@@ -159,9 +159,9 @@ export async function seedNepalInitialData(force = false) {
 
   await db.targets.bulkPut([...user1Targets, ...user2Targets]);
 
-  // 3. SEED SUBJECTS & TOPICS
+  // 3. SEED ALL SUBJECTS FOR EVERY TARGET
   const subjects: Subject[] = [
-    // User 1 Subjects
+    // Siddhartha: RBB IT
     {
       id: 'sub-net-rbb',
       userId: user1Id,
@@ -189,7 +189,65 @@ export async function seedNepalInitialData(force = false) {
       createdAt: now,
       updatedAt: now,
     },
-    // User 2 Subjects
+    // Siddhartha: NRB Assistant
+    {
+      id: 'sub-nrb-bank-u1',
+      userId: user1Id,
+      targetId: 'target-u1-nrb',
+      name: 'Banking Structure & Acts',
+      description: 'NRB Act 2058, BAFIA 2073, Monetary Policy of Nepal',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'sub-nrb-econ-u1',
+      userId: user1Id,
+      targetId: 'target-u1-nrb',
+      name: 'Economics & General Awareness',
+      description: 'Macroeconomics, Inflation, Remittance, Nepal Economy',
+      createdAt: now,
+      updatedAt: now,
+    },
+    // Siddhartha: AI Course
+    {
+      id: 'sub-ai-ml',
+      userId: user1Id,
+      targetId: 'target-u1-ai',
+      name: 'Machine Learning',
+      description: 'Supervised, Unsupervised, Neural Networks & PyTorch',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'sub-ai-py',
+      userId: user1Id,
+      targetId: 'target-u1-ai',
+      name: 'Python for AI & Data',
+      description: 'NumPy, Pandas, Vector Math, Scikit-Learn',
+      createdAt: now,
+      updatedAt: now,
+    },
+    // Siddhartha: College
+    {
+      id: 'sub-col-compiler',
+      userId: user1Id,
+      targetId: 'target-u1-college',
+      name: 'Compiler Design',
+      description: 'Lexical Analysis, Parsing, Syntax Directed Translation',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'sub-col-netprog',
+      userId: user1Id,
+      targetId: 'target-u1-college',
+      name: 'Network Programming',
+      description: 'Socket APIs, TCP/UDP Clients and Servers in C# / C++',
+      createdAt: now,
+      updatedAt: now,
+    },
+
+    // Shilpa: NRB Administration
     {
       id: 'sub-bank-laws',
       userId: user2Id,
@@ -207,11 +265,50 @@ export async function seedNepalInitialData(force = false) {
       description: 'Double Entry, Balance Sheet, Budgeting, HR Planning & Motivation',
       createdAt: now,
       updatedAt: now,
+    },
+    // Shilpa: RBB Administration
+    {
+      id: 'sub-rbb-admin',
+      userId: user2Id,
+      targetId: 'target-u2-rbb',
+      name: 'Office Management & Communication',
+      description: 'Record Keeping, Official Correspondence, Decision Making',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'sub-rbb-acct',
+      userId: user2Id,
+      targetId: 'target-u2-rbb',
+      name: 'Financial Accounting & Auditing',
+      description: 'Financial Statements, Trial Balance, Audit Procedures in Nepal',
+      createdAt: now,
+      updatedAt: now,
+    },
+    // Shilpa: Sangathit Sanstha
+    {
+      id: 'sub-sanstha-gk',
+      userId: user2Id,
+      targetId: 'target-u2-sanstha',
+      name: 'General Knowledge & Governance',
+      description: 'Constitution of Nepal, Public Governance, Geography & History',
+      createdAt: now,
+      updatedAt: now,
+    },
+    // Shilpa: College
+    {
+      id: 'sub-col-shilpa-fin',
+      userId: user2Id,
+      targetId: 'target-u2-college',
+      name: 'Advanced Financial Management',
+      description: 'Capital Structure, Working Capital, Ratio Analysis',
+      createdAt: now,
+      updatedAt: now,
     }
   ];
 
   const topics: Topic[] = [
-    // User 1 topics
+    // Siddhartha topics
     {
       id: 'top-osi-rbb',
       userId: user1Id,
@@ -252,7 +349,38 @@ export async function seedNepalInitialData(force = false) {
       createdAt: now,
       updatedAt: now,
     },
-    // User 2 topics
+    {
+      id: 'top-ai-reg',
+      userId: user1Id,
+      targetId: 'target-u1-ai',
+      subjectId: 'sub-ai-ml',
+      name: 'Linear & Logistic Regression',
+      description: 'Cost functions, Gradient Descent, Classification Metrics',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'top-ai-nn',
+      userId: user1Id,
+      targetId: 'target-u1-ai',
+      subjectId: 'sub-ai-ml',
+      name: 'Neural Networks Basics',
+      description: 'Perceptron, Multi-Layer Perceptrons, Activation Functions',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'top-col-lex',
+      userId: user1Id,
+      targetId: 'target-u1-college',
+      subjectId: 'sub-col-compiler',
+      name: 'Lexical Analysis',
+      description: 'DFA, NFA, Regular Expressions, Lex tool',
+      createdAt: now,
+      updatedAt: now,
+    },
+
+    // Shilpa topics
     {
       id: 'top-nrb-act',
       userId: user2Id,
@@ -270,6 +398,16 @@ export async function seedNepalInitialData(force = false) {
       subjectId: 'sub-bank-laws',
       name: 'BAFIA 2073 Provisions',
       description: 'Bank classification (A, B, C, D), Capital adequacy, Governance',
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: 'top-rbb-corr',
+      userId: user2Id,
+      targetId: 'target-u2-rbb',
+      subjectId: 'sub-rbb-admin',
+      name: 'Official Correspondence & Filing',
+      description: 'Tippani writing, Official Letter Formats in Nepali & English',
       createdAt: now,
       updatedAt: now,
     }
@@ -650,4 +788,23 @@ export async function seedNepalInitialData(force = false) {
   ];
 
   await db.studySchedules.bulkPut(schedules);
+}
+
+/**
+ * Resets all study sessions and attempts to 0 (Day 0 Start).
+ */
+export async function resetAllProgressToZero(mode: 'all' | 'user', userId?: string) {
+  if (mode === 'all') {
+    await Promise.all([
+      db.studySessions.clear(),
+      db.attempts.clear(),
+      db.quizSessions.clear(),
+    ]);
+  } else if (userId) {
+    await Promise.all([
+      db.studySessions.where('userId').equals(userId).delete(),
+      db.attempts.where('userId').equals(userId).delete(),
+      db.quizSessions.where('userId').equals(userId).delete(),
+    ]);
+  }
 }

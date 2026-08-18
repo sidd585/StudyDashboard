@@ -129,6 +129,26 @@ export const Together: React.FC = () => {
         </div>
       </div>
 
+      {/* Mutual Reset Alert Banner if requested */}
+      {typeof window !== 'undefined' && localStorage.getItem('studydashboard_pending_reset') && (
+        <Card className="p-4 border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <p className="text-xs font-bold text-amber-300">
+                Shared Progress Reset Request Pending
+              </p>
+              <p className="text-[11px] text-slate-300">
+                {JSON.parse(localStorage.getItem('studydashboard_pending_reset') || '{}').requestedBy || 'Your study partner'} has requested to reset all study time and streaks back to Day 0 (Fresh Start).
+              </p>
+            </div>
+          </div>
+          <a href="#/settings" className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors text-center">
+            Review in Settings
+          </a>
+        </Card>
+      )}
+
       {/* Side-by-Side Today Comparison Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* 1. Siddhartha Card */}

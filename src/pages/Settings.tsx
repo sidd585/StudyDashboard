@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getUserSettings, updateUserSettings } from '../db';
 import { useUser } from '../context/UserContext';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { isSupabaseConfigured, USER_PROFILES } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -18,9 +18,12 @@ import {
   Globe,
   ShieldCheck,
   RotateCcw,
+  AlertTriangle,
+  Flame,
 } from 'lucide-react';
 import { sendDailySummaryEmail } from '../services/emailService';
-import { exportBackupData, validateBackupData, restoreBackupData } from '../services/backupService';
+import { exportBackupData } from '../services/backupService';
+import { resetAllProgressToZero } from '../db/seed';
 import { format, startOfDay, endOfDay } from 'date-fns';
 
 export const Settings: React.FC = () => {
@@ -32,6 +35,31 @@ export const Settings: React.FC = () => {
   const [isReminder15m, setIsReminder15m] = useState(true);
   const [isDaily10pm, setIsDaily10pm] = useState(true);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+
+  // Mutual Reset Proposal State (stored in localStorage for instantaneous sync)
+  const [pendingResetProposal, setPendingResetProposal] = useState<{
+    requestedBy: string;
+    requestedTime: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const checkReset = () => {
+      const raw = localStorage.getItem('studydashboard_pending_reset');
+      if (raw) {
+        try {
+          setPendingResetProposal(JSON.parse(raw));
+        } catch {
+          setPendingResetProposal(null);
+        }
+      } else {
+        setPendingResetProposal(null);
+      }
+    };
+    checkReset();
+    window.addEventListener('storage', checkReset);
+    return () => window.removeEventListener('storage', checkReset);
+  }, []);
 
   // Sync settings when loaded
   React.useEffect(() => {
@@ -121,19 +149,85 @@ export const Settings: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `StudyOS-Backup-${currentUser.name}-${format(new Date(), 'yyyy-MM-dd')}.json`;
+    a.download = `StudyDashboard-Backup-${currentUser.name}-${format(new Date(), 'yyyy-MM-dd')}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setBackupStatus('Backup exported successfully.');
     setTimeout(() => setBackupStatus(null), 3000);
   };
 
+  // Reset Progress Handlers
+  const handleRequestSharedReset = () => {
+    const proposal = {
+      requestedBy: currentUser.name,
+      requestedTime: format(new Date(), 'hh:mm a, MMM d'),
+    };
+    localStorage.setItem('studydashboard_pending_reset', JSON.stringify(proposal));
+    setPendingResetProposal(proposal);
+    setResetMessage(`Reset proposal sent by ${currentUser.name}. Waiting for study partner to accept.`);
+  };
+
+  const handleAcceptSharedReset = async () => {
+    await resetAllProgressToZero('all');
+    localStorage.removeItem('studydashboard_pending_reset');
+    setPendingResetProposal(null);
+    setResetMessage('All study progress & streaks have been successfully reset to Day 0 (Fresh Start)!');
+    setTimeout(() => setResetMessage(null), 5000);
+  };
+
+  const handleDeclineSharedReset = () => {
+    localStorage.removeItem('studydashboard_pending_reset');
+    setPendingResetProposal(null);
+    setResetMessage('Reset request was declined.');
+    setTimeout(() => setResetMessage(null), 4000);
+  };
+
+  const handleResetPersonalStats = async () => {
+    if (window.confirm(`Are you sure you want to reset all study time, streaks, and quiz attempts for ${currentUser.name} to 0?`)) {
+      await resetAllProgressToZero('user', currentUser.id);
+      setResetMessage(`Personal streak and statistics for ${currentUser.name} have been reset to 0.`);
+      setTimeout(() => setResetMessage(null), 4000);
+    }
+  };
+
   return (
     <div className="max-w-4xl space-y-6 pb-12 animate-fade-in">
       <div>
         <h2 className="text-xl font-bold text-white tracking-tight">Settings & Notifications</h2>
-        <p className="text-xs text-slate-400">Manage account, automated Asia/Kathmandu email summaries, and backups.</p>
+        <p className="text-xs text-slate-400">Manage account, automated Asia/Kathmandu email summaries, streaks, and backups.</p>
       </div>
+
+      {/* Pending Reset Proposal Alert Banner */}
+      {pendingResetProposal && (
+        <Card className="p-5 border-amber-500/40 bg-amber-500/10 space-y-3 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-amber-300">
+                Shared Progress Reset Request Pending
+              </h4>
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                <strong>{pendingResetProposal.requestedBy}</strong> has requested to reset all study sessions, question attempts, and streaks back to <strong>Day 0 (Fresh Start)</strong> for both Siddhartha and Shilpa.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <Button variant="primary" size="sm" onClick={handleAcceptSharedReset}>
+              Accept & Reset All to Day 0
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleDeclineSharedReset}>
+              Decline Request
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {resetMessage && (
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+          {resetMessage}
+        </div>
+      )}
 
       {/* 1. Active Profile Switcher Box */}
       <Card className="p-6 border-slate-800 space-y-4">
@@ -175,7 +269,40 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 2. Automated Email Reminders & 10 PM Summary Settings */}
+      {/* 2. Reset Progress & Streak (Mutual Confirmation) */}
+      <Card className="p-6 border-slate-800 space-y-4">
+        <h3 className="text-sm font-bold text-white flex items-center gap-2">
+          <RotateCcw className="w-4 h-4 text-rose-400" />
+          <span>Reset Streak & Study Progress (Day 0 Start)</span>
+        </h3>
+
+        <p className="text-xs text-slate-400 leading-relaxed">
+          Start fresh from Day 1. You can reset your personal stats immediately, or send a shared reset proposal that requires acceptance by both Siddhartha and Shilpa.
+        </p>
+
+        <div className="flex flex-wrap items-center gap-3 pt-2">
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<Flame className="w-3.5 h-3.5 text-amber-400" />}
+            onClick={handleResetPersonalStats}
+          >
+            Reset My Personal Streak to 0
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+            leftIcon={<RotateCcw className="w-3.5 h-3.5 text-rose-400" />}
+            onClick={handleRequestSharedReset}
+          >
+            Request Shared Room Reset (Day 0)
+          </Button>
+        </div>
+      </Card>
+
+      {/* 3. Automated Email Reminders & 10 PM Summary Settings */}
       <Card className="p-6 border-slate-800 space-y-5">
         <div className="flex items-center justify-between">
           <div>
@@ -212,7 +339,7 @@ export const Settings: React.FC = () => {
                 onChange={e => setIsReminder15m(e.target.checked)}
                 className="rounded text-brand-600 focus:ring-brand-500"
               />
-              <span>Send 15-minute advance reminder before scheduled study sessions (e.g. 6:45 PM for 7:00 PM session)</span>
+              <span>Send 15-minute advance reminder before scheduled study sessions</span>
             </label>
 
             <label className="flex items-center gap-3 text-xs text-slate-300 cursor-pointer">
@@ -222,7 +349,7 @@ export const Settings: React.FC = () => {
                 onChange={e => setIsDaily10pm(e.target.checked)}
                 className="rounded text-brand-600 focus:ring-brand-500"
               />
-              <span>Send 10:00 PM Asia/Kathmandu Daily Summary Email (Target progress, MCQ accuracy & tomorrow's plan)</span>
+              <span>Send 10:00 PM Asia/Kathmandu Daily Summary Email</span>
             </label>
           </div>
 
@@ -237,28 +364,7 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 3. Supabase & Vercel Deployment Guide */}
-      <Card className="p-6 border-slate-800 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <Globe className="w-4 h-4 text-emerald-400" />
-          <span>Supabase PostgreSQL & Vercel Cloud Sync</span>
-        </h3>
-
-        <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-2.5 h-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-            <span className="text-xs font-bold text-white">
-              {isSupabaseConfigured ? 'Supabase Live Connected' : 'Local Hybrid Client Mode (Ready for Vercel)'}
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 leading-relaxed">
-            The full PostgreSQL schema with Row Level Security is stored in <code className="text-brand-400">supabase/schema.sql</code>.
-            Deploy directly to Vercel and add your <code className="text-brand-400">NEXT_PUBLIC_SUPABASE_URL</code>, <code className="text-brand-400">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, and <code className="text-brand-400">RESEND_API_KEY</code> environment variables.
-          </p>
-        </div>
-      </Card>
-
-      {/* 4. Full JSON Backup & Data Management */}
+      {/* 4. Local Backup & Export */}
       <Card className="p-6 border-slate-800 space-y-4">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Database className="w-4 h-4 text-blue-400" />

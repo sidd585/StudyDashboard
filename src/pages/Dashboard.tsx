@@ -218,12 +218,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
       )}
 
       {/* Personalized Greeting Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
             Welcome back, <span className="text-brand-400">{currentUser.name}</span> 👋
           </h2>
           <p className="text-xs text-slate-400">Track your daily study targets, solve MCQs, and stay consistent.</p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs border-slate-700 text-slate-300"
+            onClick={() => onNavigate('settings')}
+          >
+            Reset Progress / Streak (0)
+          </Button>
         </div>
       </div>
 
