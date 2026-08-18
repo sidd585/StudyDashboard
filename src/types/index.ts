@@ -231,6 +231,8 @@ export interface ExtractedQuestion {
   approved: boolean;
   hasParsingIssues?: boolean;
   parsingIssues?: string[];
+  status?: 'valid' | 'needs_review' | 'answer_unknown';
+  rawSourceText?: string;
   difficulty?: Difficulty;
   source?: string;
 }

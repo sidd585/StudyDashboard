@@ -14,6 +14,8 @@ import { Together } from './pages/Together';
 import { Materials } from './pages/Materials';
 import { Settings } from './pages/Settings';
 
+import { calculateKathmanduStreak } from './utils/dateUtils';
+
 export const App: React.FC = () => {
   const { currentUser } = useUser();
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
@@ -26,9 +28,7 @@ export const App: React.FC = () => {
     [currentUser.id]
   ) || [];
 
-  const studyStreak = userSessions.length === 0 ? 0 : new Set(
-    userSessions.map(s => new Date(s.startTime).toDateString())
-  ).size;
+  const studyStreak = calculateKathmanduStreak(userSessions);
 
   const handleNavigate = (page: PageId, params?: any) => {
     setActivePracticeSessionId(null);

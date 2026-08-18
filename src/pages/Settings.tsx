@@ -186,15 +186,15 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 2. Reset Progress & Streak (2-Step Verification Modal) */}
-      <Card className="p-6 border-slate-800 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <RotateCcw className="w-4 h-4 text-rose-400" />
-          <span>Reset Study Dashboard & Streak (Day 0 Start)</span>
+      {/* 2. Data & Progress (Reset All Study Progress) */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <RotateCcw className="w-4 h-4 text-rose-500" />
+          <span>Data & Progress: Reset All Study Progress</span>
         </h3>
 
-        <p className="text-xs text-slate-400 leading-relaxed">
-          Start fresh from Day 1. You can choose to reset both Siddhartha and Shilpa together, or reset only one profile. Includes a 2-step double verification to prevent accidental clicks.
+        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+          This will permanently remove your study sessions, MCQ attempts, progress statistics and streak history. Your Targets, Subjects, Questions, Materials and Settings will remain.
         </p>
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -204,7 +204,7 @@ export const Settings: React.FC = () => {
             leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
             onClick={() => setIsResetModalOpen(true)}
           >
-            Reset Dashboard (2-Step Verification)
+            Reset Progress / Streak
           </Button>
 
           <Button
