@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, updateUserSettings } from '../db';
+import { resetAllProgressToZero } from '../db/seed';
 import { useUser } from '../context/UserContext';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { Card } from '../components/common/Card';
@@ -196,14 +197,30 @@ export const Settings: React.FC = () => {
           Start fresh from Day 1. You can choose to reset both Siddhartha and Shilpa together, or reset only one profile. Includes a 2-step double verification to prevent accidental clicks.
         </p>
 
-        <div className="pt-2">
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <Button
             variant="danger"
             size="sm"
             leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
             onClick={() => setIsResetModalOpen(true)}
           >
-            Reset Dashboard & Streak (2-Step Verification)
+            Reset Dashboard (2-Step Verification)
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-rose-500/50 text-rose-400 hover:bg-rose-500/10"
+            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+            onClick={async () => {
+              if (window.confirm("Wipe ALL study history, streaks, and attempts for BOTH Siddhartha & Shilpa back to 0?")) {
+                await resetAllProgressToZero('all');
+                localStorage.setItem('studydashboard_is_reset_v5', 'true');
+                window.location.reload();
+              }
+            }}
+          >
+            Instant Wipe Both to Day 0
           </Button>
         </div>
       </Card>
@@ -213,7 +230,7 @@ export const Settings: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Mail className="w-4 h-4 text-indigo-400" />
+              <Mail className="w-4 h-4 text-blue-400" />
               <span>Automated Email Reminders & Daily Summary</span>
             </h3>
             <p className="text-xs text-slate-400">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>

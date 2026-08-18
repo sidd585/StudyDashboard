@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
+import { resetAllProgressToZero } from '../db/seed';
 import { useUser } from '../context/UserContext';
 import { useStudyTimer } from '../context/StudyTimerContext';
 import { Card } from '../components/common/Card';
@@ -199,7 +200,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     <div className="space-y-6 pb-12 animate-fade-in">
       {/* 1. Next Study Session Banner (if scheduled) */}
       {nextSession && (
-        <div className="p-4 rounded-2xl bg-gradient-to-r from-brand-600/20 via-indigo-600/10 to-slate-900 border border-brand-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-600/20 via-sky-600/10 to-slate-900 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-600/20 border border-brand-500/40 flex items-center justify-center text-brand-400">
               <Calendar className="w-5 h-5" />
@@ -245,7 +246,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
             onClick={() => setIsResetModalOpen(true)}
           >
-            Reset Dashboard / Streak
+            Reset Dashboard
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs border-rose-500/40 text-rose-400 hover:bg-rose-500/10"
+            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+            onClick={async () => {
+              if (window.confirm("Wipe ALL records & streaks for BOTH Siddhartha & Shilpa back to Day 0?")) {
+                await resetAllProgressToZero('all');
+                localStorage.setItem('studydashboard_is_reset_v5', 'true');
+                window.location.reload();
+              }
+            }}
+          >
+            Instant Wipe to 0
           </Button>
         </div>
       </div>
@@ -508,7 +525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         {/* Chart 2: Target Time Breakdown */}
         <Card className="p-5 border-slate-800">
           <h3 className="text-sm font-bold text-white mb-1 flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-indigo-400" />
+            <Sparkles className="w-4 h-4 text-amber-400" />
             <span>Target Time Distribution</span>
           </h3>
           <p className="text-xs text-slate-400 mb-4">Minutes allocated across active targets</p>

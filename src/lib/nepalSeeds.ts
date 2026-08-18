@@ -17,7 +17,7 @@ export const NEPAL_EXAM_TEMPLATES: Record<string, TargetTemplate> = {
   rbb_it: {
     name: 'RBB IT (Level 5/6)',
     type: 'Competitive Exam',
-    color: '#6366f1', // Indigo
+    color: '#0284c7', // Clean Blue
     icon: 'Cpu',
     dailyGoalMinutes: 90,
     weeklyGoalMinutes: 600,

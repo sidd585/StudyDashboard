@@ -41,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
         <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
           {currentInfo.title}
           {currentPage === 'together' && (
-            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
               Siddhartha & Shilpa
             </span>
           )}
@@ -91,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
           className="p-2 rounded-xl text-slate-400 hover:text-slate-100 hover:bg-slate-800 transition-colors"
           aria-label="Toggle theme"
         >
-          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-blue-400" />}
         </button>
       </div>
     </header>

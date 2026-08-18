@@ -367,7 +367,7 @@ export const Targets: React.FC = () => {
         <Card className="p-4 border-slate-800 flex flex-col h-[600px]">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-400" />
+              <BookOpen className="w-4 h-4 text-sky-400" />
               <span>Subjects ({subjects.length})</span>
             </span>
             {selectedTargetId && (
@@ -394,7 +394,7 @@ export const Targets: React.FC = () => {
                     onClick={() => setSelectedSubjectId(subject.id)}
                     className={`p-3 rounded-xl border cursor-pointer transition-all ${
                       isSelected
-                        ? 'bg-indigo-600/10 border-indigo-500/50 text-white shadow-sm'
+                        ? 'bg-blue-600/10 border-blue-500/50 text-white shadow-sm'
                         : 'bg-slate-900/40 border-slate-800/80 text-slate-300 hover:border-slate-700'
                     }`}
                   >
@@ -413,7 +413,7 @@ export const Targets: React.FC = () => {
         <Card className="p-4 border-slate-800 flex flex-col h-[600px]">
           <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Tag className="w-4 h-4 text-purple-400" />
+              <Tag className="w-4 h-4 text-sky-400" />
               <span>Topics ({topics.length})</span>
             </span>
             {selectedSubjectId && (

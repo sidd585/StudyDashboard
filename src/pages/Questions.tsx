@@ -365,7 +365,7 @@ export const Questions: React.FC = () => {
                     {q.difficulty}
                   </Badge>
                   {q.isShared && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center gap-1">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
                       <Share2 className="w-3 h-3" /> Shared
                     </span>
                   )}
