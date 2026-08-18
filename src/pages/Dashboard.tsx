@@ -18,10 +18,11 @@ import {
   Calendar,
   Sparkles,
   ChevronRight,
-  Flame,
   BarChart3,
   Sliders,
+  RotateCcw,
 } from 'lucide-react';
+import { ResetModal } from '../components/common/ResetModal';
 import {
   ResponsiveContainer,
   BarChart,
@@ -43,7 +44,9 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { currentUser } = useUser();
-  const { startSession, openModal } = useStudyTimer();
+  const { startSession } = useStudyTimer();
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
   // 1. Live Queries for current user
@@ -217,6 +220,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       )}
 
+      {/* Reset Notification Toast */}
+      {resetMessage && (
+        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{resetMessage}</span>
+        </div>
+      )}
+
       {/* Personalized Greeting Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -228,12 +239,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
         <div className="flex items-center gap-2">
           <Button
-            variant="outline"
+            variant="danger"
             size="sm"
-            className="text-xs border-slate-700 text-slate-300"
-            onClick={() => onNavigate('settings')}
+            className="text-xs"
+            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+            onClick={() => setIsResetModalOpen(true)}
           >
-            Reset Progress / Streak (0)
+            Reset Dashboard / Streak
           </Button>
         </div>
       </div>
@@ -534,6 +546,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           </div>
         </Card>
       </div>
+
+      {/* 2-Step Verification Reset Modal */}
+      <ResetModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onSuccess={(msg) => {
+          setResetMessage(msg);
+          setTimeout(() => setResetMessage(null), 5000);
+        }}
+      />
     </div>
   );
 };

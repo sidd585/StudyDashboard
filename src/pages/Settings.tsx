@@ -1,34 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getUserSettings, updateUserSettings } from '../db';
+import { db, updateUserSettings } from '../db';
 import { useUser } from '../context/UserContext';
-import { isSupabaseConfigured, USER_PROFILES } from '../lib/supabase';
+import { isSupabaseConfigured } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
+import { ResetModal } from '../components/common/ResetModal';
 import {
-  Settings as SettingsIcon,
   Mail,
-  Bell,
   Database,
   Download,
-  Upload,
-  Sparkles,
-  CheckCircle2,
-  Globe,
   ShieldCheck,
   RotateCcw,
-  AlertTriangle,
   Flame,
+  CheckCircle2,
 } from 'lucide-react';
 import { sendDailySummaryEmail } from '../services/emailService';
 import { exportBackupData } from '../services/backupService';
-import { resetAllProgressToZero } from '../db/seed';
 import { format, startOfDay, endOfDay } from 'date-fns';
 
 export const Settings: React.FC = () => {
   const { activeProfileKey, currentUser, switchUser } = useUser();
-  const settings = useLiveQuery(() => getUserSettings(currentUser.id), [currentUser.id]);
+  
+  // Direct table query (avoid async functions inside useLiveQuery)
+  const settings = useLiveQuery(() => db.userSettings.get(currentUser.id), [currentUser.id]);
 
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [recipientEmail, setRecipientEmail] = useState(currentUser.email);
@@ -36,37 +32,16 @@ export const Settings: React.FC = () => {
   const [isDaily10pm, setIsDaily10pm] = useState(true);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
-
-  // Mutual Reset Proposal State (stored in localStorage for instantaneous sync)
-  const [pendingResetProposal, setPendingResetProposal] = useState<{
-    requestedBy: string;
-    requestedTime: string;
-  } | null>(null);
-
-  useEffect(() => {
-    const checkReset = () => {
-      const raw = localStorage.getItem('studydashboard_pending_reset');
-      if (raw) {
-        try {
-          setPendingResetProposal(JSON.parse(raw));
-        } catch {
-          setPendingResetProposal(null);
-        }
-      } else {
-        setPendingResetProposal(null);
-      }
-    };
-    checkReset();
-    window.addEventListener('storage', checkReset);
-    return () => window.removeEventListener('storage', checkReset);
-  }, []);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   // Sync settings when loaded
-  React.useEffect(() => {
+  useEffect(() => {
     if (settings) {
       setRecipientEmail(settings.recipientEmail || currentUser.email);
       setIsReminder15m(settings.reminder15minEnabled);
       setIsDaily10pm(settings.dailySummary10pmEnabled);
+    } else {
+      setRecipientEmail(currentUser.email);
     }
   }, [settings, currentUser]);
 
@@ -156,40 +131,6 @@ export const Settings: React.FC = () => {
     setTimeout(() => setBackupStatus(null), 3000);
   };
 
-  // Reset Progress Handlers
-  const handleRequestSharedReset = () => {
-    const proposal = {
-      requestedBy: currentUser.name,
-      requestedTime: format(new Date(), 'hh:mm a, MMM d'),
-    };
-    localStorage.setItem('studydashboard_pending_reset', JSON.stringify(proposal));
-    setPendingResetProposal(proposal);
-    setResetMessage(`Reset proposal sent by ${currentUser.name}. Waiting for study partner to accept.`);
-  };
-
-  const handleAcceptSharedReset = async () => {
-    await resetAllProgressToZero('all');
-    localStorage.removeItem('studydashboard_pending_reset');
-    setPendingResetProposal(null);
-    setResetMessage('All study progress & streaks have been successfully reset to Day 0 (Fresh Start)!');
-    setTimeout(() => setResetMessage(null), 5000);
-  };
-
-  const handleDeclineSharedReset = () => {
-    localStorage.removeItem('studydashboard_pending_reset');
-    setPendingResetProposal(null);
-    setResetMessage('Reset request was declined.');
-    setTimeout(() => setResetMessage(null), 4000);
-  };
-
-  const handleResetPersonalStats = async () => {
-    if (window.confirm(`Are you sure you want to reset all study time, streaks, and quiz attempts for ${currentUser.name} to 0?`)) {
-      await resetAllProgressToZero('user', currentUser.id);
-      setResetMessage(`Personal streak and statistics for ${currentUser.name} have been reset to 0.`);
-      setTimeout(() => setResetMessage(null), 4000);
-    }
-  };
-
   return (
     <div className="max-w-4xl space-y-6 pb-12 animate-fade-in">
       <div>
@@ -197,35 +138,10 @@ export const Settings: React.FC = () => {
         <p className="text-xs text-slate-400">Manage account, automated Asia/Kathmandu email summaries, streaks, and backups.</p>
       </div>
 
-      {/* Pending Reset Proposal Alert Banner */}
-      {pendingResetProposal && (
-        <Card className="p-5 border-amber-500/40 bg-amber-500/10 space-y-3 animate-fade-in">
-          <div className="flex items-start gap-3">
-            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h4 className="text-sm font-bold text-amber-300">
-                Shared Progress Reset Request Pending
-              </h4>
-              <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                <strong>{pendingResetProposal.requestedBy}</strong> has requested to reset all study sessions, question attempts, and streaks back to <strong>Day 0 (Fresh Start)</strong> for both Siddhartha and Shilpa.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 pt-2">
-            <Button variant="primary" size="sm" onClick={handleAcceptSharedReset}>
-              Accept & Reset All to Day 0
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleDeclineSharedReset}>
-              Decline Request
-            </Button>
-          </div>
-        </Card>
-      )}
-
       {resetMessage && (
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-          {resetMessage}
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{resetMessage}</span>
         </div>
       )}
 
@@ -246,7 +162,7 @@ export const Settings: React.FC = () => {
             <div>
               <p className="text-base font-bold text-white">{currentUser.name}</p>
               <p className="text-xs text-slate-400">{currentUser.email}</p>
-              <Badge variant="brand" className="mt-1">Study Together Partner</Badge>
+              <Badge variant="brand" className="mt-1">Active Study Partner</Badge>
             </div>
           </div>
 
@@ -269,35 +185,25 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 2. Reset Progress & Streak (Mutual Confirmation) */}
+      {/* 2. Reset Progress & Streak (2-Step Verification Modal) */}
       <Card className="p-6 border-slate-800 space-y-4">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <RotateCcw className="w-4 h-4 text-rose-400" />
-          <span>Reset Streak & Study Progress (Day 0 Start)</span>
+          <span>Reset Study Dashboard & Streak (Day 0 Start)</span>
         </h3>
 
         <p className="text-xs text-slate-400 leading-relaxed">
-          Start fresh from Day 1. You can reset your personal stats immediately, or send a shared reset proposal that requires acceptance by both Siddhartha and Shilpa.
+          Start fresh from Day 1. You can choose to reset both Siddhartha and Shilpa together, or reset only one profile. Includes a 2-step double verification to prevent accidental clicks.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+        <div className="pt-2">
           <Button
-            variant="outline"
+            variant="danger"
             size="sm"
-            leftIcon={<Flame className="w-3.5 h-3.5 text-amber-400" />}
-            onClick={handleResetPersonalStats}
+            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+            onClick={() => setIsResetModalOpen(true)}
           >
-            Reset My Personal Streak to 0
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
-            leftIcon={<RotateCcw className="w-3.5 h-3.5 text-rose-400" />}
-            onClick={handleRequestSharedReset}
-          >
-            Request Shared Room Reset (Day 0)
+            Reset Dashboard & Streak (2-Step Verification)
           </Button>
         </div>
       </Card>
@@ -388,6 +294,16 @@ export const Settings: React.FC = () => {
           </Button>
         </div>
       </Card>
+
+      {/* 2-Step Verification Reset Modal */}
+      <ResetModal
+        isOpen={isResetModalOpen}
+        onClose={() => setIsResetModalOpen(false)}
+        onSuccess={(msg) => {
+          setResetMessage(msg);
+          setTimeout(() => setResetMessage(null), 5000);
+        }}
+      />
     </div>
   );
 };

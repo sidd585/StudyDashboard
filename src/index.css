@@ -17,88 +17,78 @@
 }
 
 /* ==========================================================================
-   BRIGHT / DAY MODE (LIGHT THEME) COMPLETE OVERRIDES
+   BRIGHT / DAY MODE (LIGHT THEME) COMPLETE BULLETPROOF OVERRIDES
    ========================================================================== */
-html.light body {
+html.light,
+html.light body,
+html.light #root,
+html.light .min-h-screen,
+html.light main {
   background-color: #f8fafc !important;
   color: #0f172a !important;
-}
-
-html.light .min-h-screen {
-  background-color: #f8fafc !important;
-  color: #0f172a !important;
-}
-
-html.light .bg-slate-950,
-html.light .bg-slate-950\/40,
-html.light .bg-slate-950\/60,
-html.light .bg-slate-950\/80 {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-}
-
-html.light .bg-slate-900,
-html.light .bg-slate-900\/30,
-html.light .bg-slate-900\/40,
-html.light .bg-slate-900\/60,
-html.light .bg-slate-900\/80 {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
-}
-
-html.light .bg-slate-800,
-html.light .bg-slate-800\/40,
-html.light .bg-slate-800\/60,
-html.light .bg-slate-800\/80 {
-  background-color: #f1f5f9 !important;
-  color: #1e293b !important;
-}
-
-html.light .border-slate-800,
-html.light .border-slate-800\/80,
-html.light .border-slate-700,
-html.light .border-slate-700\/80 {
-  border-color: #e2e8f0 !important;
-}
-
-html.light .text-white {
-  color: #0f172a !important;
-}
-
-html.light .text-slate-100,
-html.light .text-slate-200,
-html.light .text-slate-300 {
-  color: #1e293b !important;
-}
-
-html.light .text-slate-400 {
-  color: #64748b !important;
 }
 
 html.light header {
-  background-color: rgba(255, 255, 255, 0.9) !important;
+  background-color: rgba(255, 255, 255, 0.95) !important;
   border-color: #e2e8f0 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+  color: #0f172a !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05) !important;
 }
 
 html.light aside {
   background-color: #ffffff !important;
   border-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.03) !important;
+}
+
+html.light [class*="bg-slate-950"],
+html.light [class*="bg-slate-900"] {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light [class*="bg-slate-800"] {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light [class*="border-slate-800"],
+html.light [class*="border-slate-700"] {
+  border-color: #e2e8f0 !important;
+}
+
+html.light [class*="text-white"],
+html.light [class*="text-slate-100"],
+html.light [class*="text-slate-200"],
+html.light h1, html.light h2, html.light h3, html.light h4, html.light h5 {
+  color: #0f172a !important;
+}
+
+html.light [class*="text-slate-300"] {
+  color: #334155 !important;
+}
+
+html.light [class*="text-slate-400"] {
+  color: #64748b !important;
 }
 
 html.light input,
 html.light select,
 html.light textarea {
-  background-color: #f8fafc !important;
+  background-color: #ffffff !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
 }
 
 html.light .bg-gradient-to-r.from-indigo-900\/40,
-html.light .bg-gradient-to-r.from-brand-600\/20 {
-  background: linear-gradient(to right, rgba(99, 102, 241, 0.1), rgba(168, 85, 247, 0.08), rgba(255, 255, 255, 0.9)) !important;
-  border-color: rgba(99, 102, 241, 0.25) !important;
+html.light .bg-gradient-to-r.from-brand-600\/20,
+html.light [class*="from-indigo-900"],
+html.light [class*="from-brand-600/20"] {
+  background: linear-gradient(to right, rgba(99, 102, 241, 0.08), rgba(168, 85, 247, 0.06), #ffffff) !important;
+  border-color: rgba(99, 102, 241, 0.2) !important;
 }
 
 /* Custom Sleek Scrollbar */
@@ -142,7 +132,7 @@ html.light .bg-gradient-to-r.from-brand-600\/20 {
 }
 
 .animate-fade-in {
-  animation: fadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-slide-up {
