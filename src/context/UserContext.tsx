@@ -12,8 +12,9 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeProfileKey, setActiveProfileKey] = useState<ActiveUserProfile>(() => {
-    const saved = localStorage.getItem('studydashboard_active_user') as ActiveUserProfile;
-    return saved && USER_PROFILES[saved] ? saved : 'siddhartha';
+    const raw = localStorage.getItem('studydashboard_active_user') || localStorage.getItem('studyos_active_user');
+    if (raw === 'shilpa' || raw === 'user2') return 'shilpa';
+    return 'siddhartha';
   });
 
   const currentUser = USER_PROFILES[activeProfileKey] || USER_PROFILES.siddhartha;
@@ -24,7 +25,16 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    seedNepalInitialData(false);
+    // Check seed version to automatically refresh targets for Siddhartha and Shilpa
+    const SEED_VERSION = 'studyos_nepal_v3_sid_shilpa';
+    const lastSeed = localStorage.getItem('studydashboard_seed_version');
+    if (lastSeed !== SEED_VERSION) {
+      seedNepalInitialData(true).then(() => {
+        localStorage.setItem('studydashboard_seed_version', SEED_VERSION);
+      });
+    } else {
+      seedNepalInitialData(false);
+    }
   }, []);
 
   return (

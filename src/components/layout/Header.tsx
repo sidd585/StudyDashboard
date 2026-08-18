@@ -81,7 +81,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
             alt={currentUser.name}
             className="w-4 h-4 rounded-full"
           />
-          <span className="hidden md:inline">{currentUser.name}</span>
+          <span className="font-semibold text-white">{currentUser.name}</span>
           <ArrowLeftRight className="w-3 h-3 text-slate-400" />
         </button>
 

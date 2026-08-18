@@ -217,6 +217,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       )}
 
+      {/* Personalized Greeting Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+            Welcome back, <span className="text-brand-400">{currentUser.name}</span> 👋
+          </h2>
+          <p className="text-xs text-slate-400">Track your daily study targets, solve MCQs, and stay consistent.</p>
+        </div>
+      </div>
+
       {/* 2. Simple Study Effectiveness Status Banner */}
       <Card className="p-5 border-slate-800 bg-slate-900/60">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
