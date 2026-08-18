@@ -82,9 +82,7 @@ export const StudyTimerModal: React.FC = () => {
   return (
     <Modal
       isOpen={isModalOpen}
-      onClose={() => {
-        if (!isRunning) closeModal();
-      }}
+      onClose={closeModal}
       title={
         isFinishing
           ? 'Log Completed Session'

@@ -64,40 +64,50 @@ export function checkDuplicate(
 }
 
 /**
+ * Preprocesses raw text by expanding inline options (e.g. "A. Cat B. Dog" -> newlines)
+ */
+export function preprocessMCQText(text: string): string {
+  return text
+    // Replace page markers
+    .replace(/--- Page \d+ ---/g, '')
+    // Ensure option letters have a newline if placed mid-sentence
+    .replace(/([^\n])\s+([A-D]\.\s+)/g, '$1\n$2')
+    .replace(/([^\n])\s+(\([A-D]\)\s+)/g, '$1\n$2')
+    .replace(/([^\n])\s+((?:Answer|Ans)[\s\:\-\=]+[A-D])/gi, '$1\n$2')
+    .replace(/([^\n])\s+((?:Explanation|Exp|Solution|Sol)[\s\:\-\=]+)/gi, '$1\n$2');
+}
+
+/**
  * Main regex-based robust MCQ text parser.
  * Handles diverse formats from PDFs, OCR, textbooks, and past papers.
  */
 export function parseMCQText(rawText: string, options: ParseOptions = {}): ExtractedQuestion[] {
   if (!rawText || !rawText.trim()) return [];
 
-  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const fullText = lines.join('\n');
+  const preprocessed = preprocessMCQText(rawText);
 
-  // Check if there is an answer key table at the bottom (e.g. "Answer Key: 1. A, 2. B" or "ANSWERS: 1-A 2-C")
-  const answerKeyMap = extractAnswerKeyMap(fullText);
+  // Check if there is an answer key table at the bottom
+  const answerKeyMap = extractAnswerKeyMap(preprocessed);
 
   // Regex patterns for Question start
-  // Matches "1.", "1)", "Q1.", "Q1:", "Q.1", "Question 1:", "Question 1.", "1 - "
   const questionStartRegex = /^(?:(?:Q(?:uestion)?\.?\s*)?(\d{1,4})[\.\)\:\-]\s*|(?:Q\s*(\d{1,4})\s*[\.\:\-]?\s*))/i;
 
   // Regex patterns for Options (A-H, or 1-8 in parentheses)
-  // Matches "A.", "A)", "(A)", "[A]", "a.", "a)", "(a)", "1.", "(1)", "1)"
   const optionRegex = /^(?:\(([A-H1-8])\)|\[([A-H1-8])\]|([A-H1-8])[\.\)\:\-]\s*)\s*(.*)/i;
 
-  // Regex for inline answers
-  // Matches "Answer: C", "Ans: (B)", "Ans - C", "Correct Answer: D", "Key: A", "Ans. B", "Answer: [B]"
+  // Regex for inline answers (e.g. Answer: B, Ans: C)
   const inlineAnswerRegex = /(?:Answer|Ans|Correct(?:\s+Answer)?|Key|Correct\s*Option)[\s\:\.\-\=]+[\(\[]?\s*([A-H1-8])\s*[\)\]]?/i;
 
   // Regex for explanation
   const explanationRegex = /(?:Explanation|Exp|Solution|Sol|Note|Reason)[\s\:\.\-\=]+([\s\S]*)/i;
 
-  const rawBlocks = splitIntoQuestionBlocks(fullText, questionStartRegex);
+  const rawBlocks = splitIntoQuestionBlocks(preprocessed, questionStartRegex);
   const extractedQuestions: ExtractedQuestion[] = [];
 
   for (let i = 0; i < rawBlocks.length; i++) {
     const block = rawBlocks[i];
     const parsed = parseSingleBlock(block, i + 1, answerKeyMap, inlineAnswerRegex, optionRegex, explanationRegex, options);
-    if (parsed) {
+    if (parsed && parsed.options.length >= 2) {
       extractedQuestions.push(parsed);
     }
   }
@@ -117,17 +127,16 @@ function splitIntoQuestionBlocks(text: string, questionStartRegex: RegExp): stri
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Check if line looks like an answer key table at the bottom
-    if (/^(?:answer\s*keys?|answers|solutions)\s*[:\-]/i.test(trimmed)) {
+    // Check if line is the start of the trailing Answer Key table at the bottom
+    if (/^(?:answer\s*key|rapid\s*answer\s*key|answer\s*sheet|answers\s*key)\b/i.test(trimmed) || /^ANSWERS\s*$/i.test(trimmed)) {
       if (currentBlock.length > 0) {
         blocks.push(currentBlock.join('\n'));
         currentBlock = [];
       }
-      break; // End of questions, rest is answer key
+      break; // End of questions, rest is answer key table
     }
 
     if (questionStartRegex.test(trimmed) && currentBlock.length > 0) {
-      // Check if current block has at least some content
       blocks.push(currentBlock.join('\n'));
       currentBlock = [trimmed];
     } else {
@@ -139,14 +148,6 @@ function splitIntoQuestionBlocks(text: string, questionStartRegex: RegExp): stri
     blocks.push(currentBlock.join('\n'));
   }
 
-  // Fallback: If no blocks detected with question numbers, try splitting by double newlines or option patterns
-  if (blocks.length <= 1 && text.length > 100) {
-    const doubleNewlineBlocks = text.split(/\n\s*\n/).map(b => b.trim()).filter(b => b.length > 10);
-    if (doubleNewlineBlocks.length > 1) {
-      return doubleNewlineBlocks;
-    }
-  }
-
   return blocks;
 }
 
@@ -155,13 +156,22 @@ function splitIntoQuestionBlocks(text: string, questionStartRegex: RegExp): stri
  */
 function extractAnswerKeyMap(text: string): Map<string, string> {
   const map = new Map<string, string>();
-  // Looks for patterns like "1. A", "1-B", "1(C)", "1: D", "Q1: A" in answer blocks
-  const keySectionMatch = text.match(/(?:answers?|solutions?|answer\s*keys?)\s*[:\-\n]([\s\S]+)$/i);
+  
+  // Find where answer key section starts
+  const keySectionMatch = text.match(/(?:answer\s*key|rapid\s*answer\s*key|answer\s*sheet|answers\s*key)\b[\s\S]*$/i);
   if (keySectionMatch) {
-    const keyText = keySectionMatch[1];
-    const pairRegex = /(?:Q\.?\s*)?(\d{1,4})[\.\s\:\-\)]+[\(\[]?([A-H])[\)\]]?/gi;
+    const keyText = keySectionMatch[0];
+    
+    // Pattern 1: "1. C 2. C 3. B" or "1.C 2.C" or "1: C" or "1-B 2-C"
+    const pairRegex1 = /(?:Q\.?\s*)?(\d{1,4})[\.\s\:\-\)]+[\(\[]?([A-D])[\)\]]?/gi;
     let match: RegExpExecArray | null;
-    while ((match = pairRegex.exec(keyText)) !== null) {
+    while ((match = pairRegex1.exec(keyText)) !== null) {
+      map.set(match[1], match[2].toUpperCase());
+    }
+
+    // Pattern 2: "1-B 2-C 3-B 4-A" in tables
+    const pairRegex2 = /(\d{1,4})-([A-D])/gi;
+    while ((match = pairRegex2.exec(keyText)) !== null) {
       map.set(match[1], match[2].toUpperCase());
     }
   }
@@ -252,32 +262,13 @@ function parseSingleBlock(
     }
 
     if (parsingOptions && currentOptionId) {
-      // Check if line contains inline multiple options (e.g. "A) Apple  B) Banana  C) Orange  D) Grape")
-      const multiOptCheck = parseInlineOptions(line);
-      if (multiOptCheck.length > 1) {
-        for (const opt of multiOptCheck) {
-          parsedOptions.push(opt);
-        }
-        currentOptionId = null;
-        currentOptionText = [];
-      } else {
-        currentOptionText.push(line);
-      }
+      currentOptionText.push(line);
     } else {
-      // Check if this line actually contains all options inline on a single line!
-      const inlineOpts = parseInlineOptions(line);
-      if (inlineOpts.length >= 2) {
-        parsingOptions = true;
-        for (const opt of inlineOpts) {
-          parsedOptions.push(opt);
-        }
-      } else {
-        questionTextLines.push(line);
-      }
+      questionTextLines.push(line);
     }
   }
 
-  // Flush remaining option
+  // Save the last trailing option
   if (currentOptionId && currentOptionText.length > 0) {
     parsedOptions.push({
       id: currentOptionId,
@@ -285,220 +276,154 @@ function parseSingleBlock(
     });
   }
 
-  // If answer was not inline, check the trailing answer key map
+  // If no options found, this block was a section header or remark, not an MCQ!
+  if (parsedOptions.length < 2) {
+    return null;
+  }
+
+  // Check answer from trailing answer key map if not detected inline
   if (!detectedAnswer && answerKeyMap.has(qNum)) {
     detectedAnswer = answerKeyMap.get(qNum) || null;
   }
 
-  const questionText = questionTextLines.join(' ').trim();
-  if (!questionText && parsedOptions.length === 0) {
-    return null;
+  const finalQuestionText = questionTextLines.join(' ').trim();
+  if (!finalQuestionText) return null;
+
+  // Determine parsing quality issues
+  const parsingIssues: string[] = [];
+  if (!detectedAnswer) {
+    parsingIssues.push('Correct answer not found (defaults to A). Please review.');
+  }
+  if (parsedOptions.length < 4) {
+    parsingIssues.push(`Only ${parsedOptions.length} options detected.`);
   }
 
-  // Map 1, 2, 3, 4 options to A, B, C, D if numeric
-  const standardizedOptions = standardizeOptionLetters(parsedOptions);
-
-  // Calculate confidence
-  let confidence: 'high' | 'medium' | 'low' = 'low';
-  let confidenceReason = '';
-
-  if (standardizedOptions.length >= 4 && detectedAnswer) {
-    confidence = 'high';
-    confidenceReason = 'Question, 4 options, and answer detected clearly';
-  } else if (standardizedOptions.length >= 2 && detectedAnswer) {
-    confidence = 'medium';
-    confidenceReason = `${standardizedOptions.length} options found with answer`;
-  } else if (standardizedOptions.length >= 2 && !detectedAnswer) {
-    confidence = 'medium';
-    confidenceReason = `${standardizedOptions.length} options found (Answer unknown)`;
-  } else {
-    confidence = 'low';
-    confidenceReason = 'Incomplete option structure detected';
-  }
+  const confidenceLevel: 'high' | 'medium' | 'low' =
+    detectedAnswer && parsedOptions.length >= 4 ? 'high' : 'medium';
 
   return {
-    tempId: `ext-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    tempId: `extracted-${Date.now()}-${indexFallback}-${Math.random().toString(36).substring(2, 6)}`,
     rawQuestionNumber: qNum,
-    questionText: questionText || 'Untitled Question',
-    options: standardizedOptions,
-    detectedAnswer: detectedAnswer || null,
-    explanation: explanation.trim(),
-    confidence,
-    confidenceReason,
+    questionText: finalQuestionText,
+    options: parsedOptions.length > 0 ? parsedOptions : [
+      { id: 'A', text: '' },
+      { id: 'B', text: '' },
+      { id: 'C', text: '' },
+      { id: 'D', text: '' },
+    ],
+    detectedAnswer: detectedAnswer || 'A',
+    explanation: explanation || '',
+    confidence: confidenceLevel,
+    hasParsingIssues: parsingIssues.length > 0,
+    parsingIssues,
+    approved: true,
     targetId: options.defaultTargetId,
     subjectId: options.defaultSubjectId,
     topicId: options.defaultTopicId,
-    approved: true, // Default checked in review list
+    source: options.sourceName || 'Imported MCQ Document',
+    difficulty: 'medium',
   };
 }
 
 /**
- * Parses multiple options present on a single line
- * e.g. "(A) Alpha (B) Beta (C) Gamma (D) Delta"
+ * Normalizes option identifiers like 1->A, a->A, etc.
  */
-function parseInlineOptions(line: string): { id: string; text: string }[] {
-  const results: { id: string; text: string }[] = [];
-  const regex = /(?:\(([A-H1-8])\)|\[([A-H1-8])\]|(?:\b|^)([A-H1-8])[\.\)\:\-])\s*([^\(\)\[\]]+?)(?=(?:\([A-H1-8]\)|\[[A-H1-8]\]|\b[A-H1-8][\.\)\:\-])|$)/gi;
-  
-  let match: RegExpExecArray | null;
-  while ((match = regex.exec(line)) !== null) {
-    const rawId = match[1] || match[2] || match[3];
-    const text = match[4].trim();
-    if (rawId && text) {
-      results.push({
-        id: normalizeOptionLetter(rawId),
-        text,
-      });
-    }
-  }
-  return results;
-}
-
 function normalizeOptionLetter(char: string): string {
-  const c = char.trim().toUpperCase();
-  const numToLetter: Record<string, string> = {
-    '1': 'A',
-    '2': 'B',
-    '3': 'C',
-    '4': 'D',
-    '5': 'E',
-    '6': 'F',
+  const map: Record<string, string> = {
+    '1': 'A', '2': 'B', '3': 'C', '4': 'D', '5': 'E', '6': 'F',
+    'A': 'A', 'B': 'B', 'C': 'C', 'D': 'D', 'E': 'E', 'F': 'F',
+    'a': 'A', 'b': 'B', 'c': 'C', 'd': 'D', 'e': 'E', 'f': 'F',
   };
-  return numToLetter[c] || c;
-}
-
-function standardizeOptionLetters(options: { id: string; text: string }[]): { id: string; text: string }[] {
-  const standardLetters = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-  return options.map((opt, idx) => {
-    // If id is not already an A-H letter, assign sequential letter
-    const id = /^[A-H]$/i.test(opt.id) ? opt.id.toUpperCase() : standardLetters[idx] || String(idx + 1);
-    return { id, text: opt.text };
-  });
+  return map[char.toUpperCase()] || 'A';
 }
 
 /**
- * Parses JSON format questions (supporting StudyOS native format or generic MCQ schema)
+ * Parses JSON question dumps
  */
-export function parseJSONQuestions(jsonString: string, options: ParseOptions = {}): ExtractedQuestion[] {
+export function parseJSONQuestions(jsonString: string): ExtractedQuestion[] {
   try {
     const data = JSON.parse(jsonString);
     const list = Array.isArray(data) ? data : data.questions || [];
-    return list.map((item: any, idx: number) => {
-      const opts: { id: string; text: string }[] = [];
-      if (Array.isArray(item.options)) {
-        item.options.forEach((o: any, oIdx: number) => {
-          if (typeof o === 'string') {
-            opts.push({ id: ['A', 'B', 'C', 'D', 'E'][oIdx] || String(oIdx + 1), text: o });
-          } else if (o && typeof o === 'object') {
-            opts.push({ id: o.id || ['A', 'B', 'C', 'D', 'E'][oIdx], text: o.text || '' });
-          }
-        });
-      } else if (typeof item.options === 'object' && item.options !== null) {
-        Object.entries(item.options).forEach(([k, v]) => {
-          opts.push({ id: k.toUpperCase(), text: String(v) });
-        });
-      }
-
-      const answer = item.correctOptionId || item.answer || item.correctAnswer || item.correct || null;
-
-      return {
-        tempId: `json-${Date.now()}-${idx}`,
-        rawQuestionNumber: String(idx + 1),
-        questionText: item.questionText || item.question || 'Untitled Question',
-        options: opts,
-        detectedAnswer: answer ? String(answer).toUpperCase() : null,
-        explanation: item.explanation || item.notes || '',
-        confidence: opts.length >= 2 ? 'high' : 'medium',
-        targetId: item.targetId || options.defaultTargetId,
-        subjectId: item.subjectId || options.defaultSubjectId,
-        topicId: item.topicId || options.defaultTopicId,
-        tags: Array.isArray(item.tags) ? item.tags : [],
-        approved: true,
-      };
-    });
+    return list.map((item: any, idx: number) => ({
+      tempId: `json-${Date.now()}-${idx}`,
+      questionText: item.question || item.questionText || item.text || '',
+      options: Array.isArray(item.options)
+        ? item.options.map((opt: any, oIdx: number) => typeof opt === 'string'
+            ? { id: String.fromCharCode(65 + oIdx), text: opt }
+            : { id: opt.id || String.fromCharCode(65 + oIdx), text: opt.text || '' })
+        : [
+            { id: 'A', text: item.optionA || item.a || '' },
+            { id: 'B', text: item.optionB || item.b || '' },
+            { id: 'C', text: item.optionC || item.c || '' },
+            { id: 'D', text: item.optionD || item.d || '' },
+          ],
+      detectedAnswer: item.answer || item.correctOptionId || item.correctAnswer || 'A',
+      explanation: item.explanation || '',
+      confidence: 'high' as const,
+      hasParsingIssues: false,
+      parsingIssues: [],
+      approved: true,
+      difficulty: item.difficulty || 'medium',
+      source: item.source || 'JSON Import',
+    }));
   } catch (err) {
-    throw new Error(`Failed to parse JSON: ${(err as Error).message}`);
+    console.error('Failed to parse JSON questions:', err);
+    return [];
   }
 }
 
 /**
- * Parses standard CSV with columns:
- * Question, Option A, Option B, Option C, Option D, Correct Answer, Explanation, Subject, Topic, Tags
+ * Parses CSV question formats
  */
-export function parseCSVQuestions(csvText: string, options: ParseOptions = {}): ExtractedQuestion[] {
-  const lines = csvText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  if (lines.length === 0) return [];
+export function parseCSVQuestions(csvText: string): ExtractedQuestion[] {
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim().length > 0);
+  if (lines.length < 2) return [];
 
-  // Simple CSV parser handling quotes
-  const parseLine = (line: string): string[] => {
-    const row: string[] = [];
-    let insideQuote = false;
-    let entry = '';
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        insideQuote = !insideQuote;
-      } else if (char === ',' && !insideQuote) {
-        row.push(entry.trim());
-        entry = '';
-      } else {
-        entry += char;
-      }
+  const questions: ExtractedQuestion[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseCSVRow(lines[i]);
+    if (row.length >= 6) {
+      questions.push({
+        tempId: `csv-${Date.now()}-${i}`,
+        questionText: row[0].trim(),
+        options: [
+          { id: 'A', text: row[1]?.trim() || '' },
+          { id: 'B', text: row[2]?.trim() || '' },
+          { id: 'C', text: row[3]?.trim() || '' },
+          { id: 'D', text: row[4]?.trim() || '' },
+        ],
+        detectedAnswer: (row[5]?.trim().toUpperCase() || 'A'),
+        explanation: row[6]?.trim() || '',
+        confidence: 'high' as const,
+        hasParsingIssues: false,
+        parsingIssues: [],
+        approved: true,
+        difficulty: 'medium',
+        source: 'CSV Import',
+      });
     }
-    row.push(entry.trim());
-    return row.map(r => r.replace(/^"|"$/g, '').trim());
-  };
-
-  const header = parseLine(lines[0]).map(h => h.toLowerCase());
-  const qIdx = header.findIndex(h => h.includes('question'));
-  const aIdx = header.findIndex(h => h.includes('option a') || h === 'a');
-  const bIdx = header.findIndex(h => h.includes('option b') || h === 'b');
-  const cIdx = header.findIndex(h => h.includes('option c') || h === 'c');
-  const dIdx = header.findIndex(h => h.includes('option d') || h === 'd');
-  const ansIdx = header.findIndex(h => h.includes('answer') || h.includes('correct'));
-  const expIdx = header.findIndex(h => h.includes('explanation') || h.includes('solution'));
-
-  const startIndex = qIdx !== -1 ? 1 : 0;
-  const results: ExtractedQuestion[] = [];
-
-  for (let i = startIndex; i < lines.length; i++) {
-    const row = parseLine(lines[i]);
-    if (row.length < 2) continue;
-
-    const questionText = qIdx !== -1 ? row[qIdx] : row[0];
-    if (!questionText) continue;
-
-    const opts: { id: string; text: string }[] = [];
-    if (aIdx !== -1 && row[aIdx]) opts.push({ id: 'A', text: row[aIdx] });
-    if (bIdx !== -1 && row[bIdx]) opts.push({ id: 'B', text: row[bIdx] });
-    if (cIdx !== -1 && row[cIdx]) opts.push({ id: 'C', text: row[cIdx] });
-    if (dIdx !== -1 && row[dIdx]) opts.push({ id: 'D', text: row[dIdx] });
-
-    // Fallback if header wasn't found
-    if (opts.length === 0 && row.length >= 5) {
-      if (row[1]) opts.push({ id: 'A', text: row[1] });
-      if (row[2]) opts.push({ id: 'B', text: row[2] });
-      if (row[3]) opts.push({ id: 'C', text: row[3] });
-      if (row[4]) opts.push({ id: 'D', text: row[4] });
-    }
-
-    const detectedAnswer = ansIdx !== -1 && row[ansIdx] ? row[ansIdx].toUpperCase().trim() : (row[5] ? row[5].toUpperCase().trim() : null);
-    const explanation = expIdx !== -1 && row[expIdx] ? row[expIdx] : (row[6] || '');
-
-    results.push({
-      tempId: `csv-${Date.now()}-${i}`,
-      rawQuestionNumber: String(i),
-      questionText,
-      options: opts,
-      detectedAnswer: detectedAnswer && /^[A-H]$/.test(detectedAnswer) ? detectedAnswer : null,
-      explanation,
-      confidence: opts.length >= 4 ? 'high' : 'medium',
-      targetId: options.defaultTargetId,
-      subjectId: options.defaultSubjectId,
-      topicId: options.defaultTopicId,
-      approved: true,
-    });
   }
 
-  return results;
+  return questions;
+}
+
+function parseCSVRow(rowText: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < rowText.length; i++) {
+    const char = rowText[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current);
+  return result;
 }

@@ -136,23 +136,37 @@ export const Questions: React.FC = () => {
 
   // Handle Text / PDF extraction
   const handleExtractText = () => {
-    if (!rawPastedText.trim() || !selectedTargetId) return;
-    const parsed = parseMCQText(rawPastedText);
+    const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
+    if (!rawPastedText.trim() || !targetId) {
+      alert('Please select a target and provide MCQ text.');
+      return;
+    }
+    const parsed = parseMCQText(rawPastedText, {
+      defaultTargetId: targetId,
+      defaultSubjectId: selectedSubjectId || undefined,
+    });
     if (parsed.length > 0) {
       setExtractedReviewList(parsed);
       setIsUploadModalOpen(false);
       setIsReviewModalOpen(true);
+    } else {
+      alert('No MCQs could be identified. Make sure each question has numbered statements (1., 2.) and options (A., B., C., D.).');
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedTargetId) return;
+    const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
+    if (!file) return;
+    if (!targetId) {
+      alert('Please create or select a study target first.');
+      return;
+    }
 
     setIsExtracting(true);
     try {
       let rawText = '';
-      if (file.type === 'application/pdf') {
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
         const pdfRes = await extractTextFromPDF(file);
         rawText = pdfRes.text;
       } else if (file.type.startsWith('image/')) {
@@ -161,13 +175,19 @@ export const Questions: React.FC = () => {
         rawText = await file.text();
       }
 
+      setRawPastedText(rawText);
+
       let parsed: ExtractedQuestion[] = [];
       if (file.name.endsWith('.json')) {
         parsed = parseJSONQuestions(rawText);
       } else if (file.name.endsWith('.csv')) {
         parsed = parseCSVQuestions(rawText);
       } else {
-        parsed = parseMCQText(rawText);
+        parsed = parseMCQText(rawText, {
+          defaultTargetId: targetId,
+          defaultSubjectId: selectedSubjectId || undefined,
+          sourceName: file.name,
+        });
       }
 
       if (parsed.length > 0) {
@@ -175,11 +195,11 @@ export const Questions: React.FC = () => {
         setIsUploadModalOpen(false);
         setIsReviewModalOpen(true);
       } else {
-        alert('Could not detect MCQ format in the uploaded file. Please check format or paste text.');
+        alert('Text extracted from document, but questions need formatting. We loaded the text into the box below for you to review and extract.');
       }
-    } catch (err) {
-      console.error(err);
-      alert('Error parsing file.');
+    } catch (err: any) {
+      console.error('File extraction error:', err);
+      alert('Could not read PDF directly. Please open the PDF, select and copy the text (Ctrl+A, Ctrl+C), and paste it directly into the text box below.');
     } finally {
       setIsExtracting(false);
     }

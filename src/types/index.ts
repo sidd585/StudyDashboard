@@ -229,4 +229,8 @@ export interface ExtractedQuestion {
   topicId?: string;
   tags?: string[];
   approved: boolean;
+  hasParsingIssues?: boolean;
+  parsingIssues?: string[];
+  difficulty?: Difficulty;
+  source?: string;
 }

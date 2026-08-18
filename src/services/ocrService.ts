@@ -8,24 +8,29 @@ export interface ExtractionProgress {
 }
 
 /**
- * Extracts selectable text directly from a PDF file using PDF.js
+ * Extracts selectable text directly from a PDF file using PDF.js with line-break preservation
  */
 export async function extractTextFromPDF(
   file: File | ArrayBuffer,
   onProgress?: (p: ExtractionProgress) => void
 ): Promise<{ text: string; pages: { pageNumber: number; text: string }[] }> {
   onProgress?.({ status: 'Loading PDF engine...', progress: 10 });
-  
+
   // Dynamic import of pdfjs-dist
   const pdfjsLib = await import('pdfjs-dist');
-  
-  // Set worker source to CDN or local blob for standalone operation
+
+  // Configure worker
   if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '3.11.174'}/pdf.worker.min.js`;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version || '3.11.174'}/build/pdf.worker.min.js`;
   }
 
   const arrayBuffer = file instanceof File ? await file.arrayBuffer() : file;
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    isEvalSupported: false,
+    useSystemFonts: true,
+  });
+
   const pdfDoc = await loadingTask.promise;
   const numPages = pdfDoc.numPages;
 
@@ -42,18 +47,40 @@ export async function extractTextFromPDF(
 
     const page = await pdfDoc.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: any) => ('str' in item ? item.str : ''))
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+    
+    let lastY: number | null = null;
+    let pageText = '';
 
-    pagesData.push({ pageNumber: i, text: pageText });
-    fullText += `\n\n--- Page ${i} ---\n` + pageText;
+    for (const item of textContent.items as any[]) {
+      if (!('str' in item)) continue;
+      const str = item.str;
+      if (!str && str !== ' ') continue;
+
+      const currentY = item.transform ? Math.round(item.transform[5]) : null;
+
+      if (lastY !== null && currentY !== null && Math.abs(currentY - lastY) >= 4) {
+        pageText += '\n' + str;
+      } else if (item.hasEOL) {
+        pageText += '\n' + str;
+      } else {
+        if (pageText && !pageText.endsWith('\n') && !pageText.endsWith(' ') && str.trim()) {
+          pageText += ' ';
+        }
+        pageText += str;
+      }
+
+      if (currentY !== null) {
+        lastY = currentY;
+      }
+    }
+
+    const cleanedPageText = pageText.trim();
+    pagesData.push({ pageNumber: i, text: cleanedPageText });
+    fullText += `\n\n--- Page ${i} ---\n` + cleanedPageText;
   }
 
   onProgress?.({ status: 'PDF Text Extraction Complete', progress: 100 });
-  return { text: fullText, pages: pagesData };
+  return { text: fullText.trim(), pages: pagesData };
 }
 
 /**
@@ -65,7 +92,6 @@ export async function performImageOCR(
 ): Promise<string> {
   onProgress?.({ status: 'Initializing OCR Engine (Tesseract.js)...', progress: 10 });
 
-  // Dynamically load Tesseract only when OCR is explicitly requested!
   const { createWorker } = await import('tesseract.js');
 
   const worker = await createWorker('eng', 1, {
@@ -88,4 +114,3 @@ export async function performImageOCR(
 }
 
 export const extractTextFromImageWithOCR = performImageOCR;
-
