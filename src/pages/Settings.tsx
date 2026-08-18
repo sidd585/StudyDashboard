@@ -158,18 +158,18 @@ export const Settings: React.FC = () => {
 
           <div className="flex items-center gap-2">
             <Button
-              variant={activeProfileKey === 'user1' ? 'primary' : 'outline'}
+              variant={activeProfileKey === 'siddhartha' ? 'primary' : 'outline'}
               size="sm"
-              onClick={() => switchUser('user1')}
+              onClick={() => switchUser('siddhartha')}
             >
-              Primary Account
+              Siddhartha View
             </Button>
             <Button
-              variant={activeProfileKey === 'user2' ? 'primary' : 'outline'}
+              variant={activeProfileKey === 'shilpa' ? 'primary' : 'outline'}
               size="sm"
-              onClick={() => switchUser('user2')}
+              onClick={() => switchUser('shilpa')}
             >
-              Partner Account
+              Shilpa View
             </Button>
           </div>
         </div>

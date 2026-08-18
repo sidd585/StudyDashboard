@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
     practice: { title: 'MCQ Practice', subtitle: 'Solve targeted questions with instant feedback and explanations.' },
     questions: { title: 'Question Bank', subtitle: 'Upload PDFs, images, or enter MCQs with mandatory review.' },
     planner: { title: 'Study Planner', subtitle: 'Schedule focused study sessions and automated email reminders.' },
-    together: { title: 'Study Together', subtitle: 'Side-by-side progress comparison for study partners.' },
+    together: { title: 'Study Together', subtitle: 'Side-by-side progress comparison for Siddhartha & Shilpa.' },
     materials: { title: 'Syllabus & Materials', subtitle: 'Upload and view syllabus PDFs, notes, and study resources.' },
     settings: { title: 'Settings', subtitle: 'Manage email reminders (15m before & 10 PM summary) and preferences.' },
   };
@@ -42,7 +42,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
           {currentInfo.title}
           {currentPage === 'together' && (
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-              Shared Accountability
+              Siddhartha & Shilpa
             </span>
           )}
         </h1>
@@ -72,9 +72,9 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
 
         {/* User Switch Pill */}
         <button
-          onClick={() => switchUser(activeProfileKey === 'user1' ? 'user2' : 'user1')}
+          onClick={() => switchUser(activeProfileKey === 'siddhartha' ? 'shilpa' : 'siddhartha')}
           className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 transition-colors"
-          title="Switch active user profile"
+          title="Switch view between Siddhartha and Shilpa"
         >
           <img
             src={currentUser.avatarUrl}

@@ -17,7 +17,7 @@ export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
-export type ActiveUserProfile = 'user1' | 'user2';
+export type ActiveUserProfile = 'siddhartha' | 'shilpa';
 
 export interface UserProfile {
   id: string;
@@ -27,16 +27,16 @@ export interface UserProfile {
 }
 
 export const USER_PROFILES: Record<ActiveUserProfile, UserProfile> = {
-  user1: {
+  siddhartha: {
     id: '11111111-1111-1111-1111-111111111111',
-    name: 'Primary Account',
-    email: 'user1@studydashboard.local',
-    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=User1',
+    name: 'Siddhartha',
+    email: 'siddhartha@studydashboard.local',
+    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=Siddhartha',
   },
-  user2: {
+  shilpa: {
     id: '22222222-2222-2222-2222-222222222222',
-    name: 'Study Partner',
-    email: 'user2@studydashboard.local',
-    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=User2',
+    name: 'Shilpa',
+    email: 'shilpa@studydashboard.local',
+    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=Shilpa',
   }
 };

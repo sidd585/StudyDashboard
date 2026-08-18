@@ -8,11 +8,8 @@ import { ProgressBar } from '../components/common/ProgressBar';
 import {
   Users2,
   Flame,
-  CheckCircle2,
   Clock,
-  Target as TargetIcon,
   HelpCircle,
-  TrendingUp,
   Sparkles,
   BarChart3,
 } from 'lucide-react';
@@ -28,8 +25,8 @@ import {
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 
 export const Together: React.FC = () => {
-  const user1Profile = USER_PROFILES.user1;
-  const user2Profile = USER_PROFILES.user2;
+  const sidProfile = USER_PROFILES.siddhartha;
+  const shilpaProfile = USER_PROFILES.shilpa;
 
   // Live queries for both users
   const allSessions = useLiveQuery(() => db.studySessions.toArray(), []) || [];
@@ -82,8 +79,8 @@ export const Together: React.FC = () => {
     };
   };
 
-  const user1Metrics = getUserMetrics(user1Profile.id);
-  const user2Metrics = getUserMetrics(user2Profile.id);
+  const sidMetrics = getUserMetrics(sidProfile.id);
+  const shilpaMetrics = getUserMetrics(shilpaProfile.id);
 
   // 7-day comparative study hours chart
   const weeklyComparisonData = Array.from({ length: 7 }, (_, i) => {
@@ -93,17 +90,17 @@ export const Together: React.FC = () => {
     const dEnd = endOfDay(d).getTime();
 
     const u1Mins = allSessions
-      .filter(s => s.userId === user1Profile.id && s.startTime >= dStart && s.startTime <= dEnd)
+      .filter(s => s.userId === sidProfile.id && s.startTime >= dStart && s.startTime <= dEnd)
       .reduce((sum, s) => sum + s.focusedMinutes, 0);
 
     const u2Mins = allSessions
-      .filter(s => s.userId === user2Profile.id && s.startTime >= dStart && s.startTime <= dEnd)
+      .filter(s => s.userId === shilpaProfile.id && s.startTime >= dStart && s.startTime <= dEnd)
       .reduce((sum, s) => sum + s.focusedMinutes, 0);
 
     return {
       day: dayLabel,
-      [user1Profile.name]: Number((u1Mins / 60).toFixed(1)),
-      [user2Profile.name]: Number((u2Mins / 60).toFixed(1)),
+      Siddhartha: Number((u1Mins / 60).toFixed(1)),
+      Shilpa: Number((u2Mins / 60).toFixed(1)),
     };
   });
 
@@ -118,10 +115,10 @@ export const Together: React.FC = () => {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-white tracking-tight">Study Together Room</h2>
-              <Badge variant="brand">Shared Accountability</Badge>
+              <Badge variant="brand">Siddhartha & Shilpa</Badge>
             </div>
             <p className="text-xs text-slate-300 mt-0.5">
-              Side-by-side progress comparison for {user1Profile.name} and {user2Profile.name}.
+              Friendly shared accountability room for <strong>Siddhartha</strong> and <strong>Shilpa</strong>.
             </p>
           </div>
         </div>
@@ -134,34 +131,34 @@ export const Together: React.FC = () => {
 
       {/* Side-by-Side Today Comparison Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* 1. User 1 Card */}
+        {/* 1. Siddhartha Card */}
         <Card className="p-6 border-slate-800 bg-gradient-to-b from-slate-900/80 to-slate-900/40 hover:border-brand-500/40 transition-all">
           <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800">
             <div className="flex items-center gap-3">
               <img
-                src={user1Profile.avatarUrl}
-                alt={user1Profile.name}
+                src={sidProfile.avatarUrl}
+                alt={sidProfile.name}
                 className="w-11 h-11 rounded-full border-2 border-brand-500 bg-slate-800"
               />
               <div>
-                <h3 className="text-base font-bold text-white leading-tight">{user1Profile.name}</h3>
-                <p className="text-xs text-slate-400">Competitive Exam Track</p>
+                <h3 className="text-base font-bold text-white leading-tight">Siddhartha</h3>
+                <p className="text-xs text-slate-400">RBB IT & Banking Track</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                user1Metrics.status === 'On Track'
+                sidMetrics.status === 'On Track'
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                  : user1Metrics.status === 'Almost There'
+                  : sidMetrics.status === 'Almost There'
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                   : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
               }`}>
-                {user1Metrics.status}
+                {sidMetrics.status}
               </span>
               <div className="flex items-center gap-1 text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full border border-amber-500/20">
                 <Flame className="w-3.5 h-3.5" />
-                <span>{user1Metrics.streak}d</span>
+                <span>{sidMetrics.streak}d</span>
               </div>
             </div>
           </div>
@@ -173,7 +170,7 @@ export const Together: React.FC = () => {
                   <Clock className="w-3.5 h-3.5 text-brand-400" />
                   <span>Today's Study</span>
                 </div>
-                <p className="text-lg font-black text-white">{user1Metrics.todayStudyFormatted}</p>
+                <p className="text-lg font-black text-white">{sidMetrics.todayStudyFormatted}</p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
@@ -181,49 +178,49 @@ export const Together: React.FC = () => {
                   <HelpCircle className="w-3.5 h-3.5 text-purple-400" />
                   <span>MCQ Accuracy</span>
                 </div>
-                <p className="text-lg font-black text-white">{user1Metrics.todayAccuracy}%</p>
-                <p className="text-[10px] text-slate-400">{user1Metrics.todayQuestionsAttempted} attempted</p>
+                <p className="text-lg font-black text-white">{sidMetrics.todayAccuracy}%</p>
+                <p className="text-[10px] text-slate-400">{sidMetrics.todayQuestionsAttempted} attempted</p>
               </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between text-xs text-slate-300 font-semibold mb-1.5">
                 <span>Daily Target Goal Completion</span>
-                <span className="text-brand-400 font-bold">{user1Metrics.todayGoalPct}%</span>
+                <span className="text-brand-400 font-bold">{sidMetrics.todayGoalPct}%</span>
               </div>
-              <ProgressBar progress={user1Metrics.todayGoalPct} size="md" />
+              <ProgressBar progress={sidMetrics.todayGoalPct} size="md" />
             </div>
           </div>
         </Card>
 
-        {/* 2. User 2 Card */}
+        {/* 2. Shilpa Card */}
         <Card className="p-6 border-slate-800 bg-gradient-to-b from-slate-900/80 to-slate-900/40 hover:border-pink-500/40 transition-all">
           <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800">
             <div className="flex items-center gap-3">
               <img
-                src={user2Profile.avatarUrl}
-                alt={user2Profile.name}
+                src={shilpaProfile.avatarUrl}
+                alt={shilpaProfile.name}
                 className="w-11 h-11 rounded-full border-2 border-pink-500 bg-slate-800"
               />
               <div>
-                <h3 className="text-base font-bold text-white leading-tight">{user2Profile.name}</h3>
-                <p className="text-xs text-slate-400">Administration & Banking Track</p>
+                <h3 className="text-base font-bold text-white leading-tight">Shilpa</h3>
+                <p className="text-xs text-slate-400">NRB & RBB Administration Track</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                user2Metrics.status === 'On Track'
+                shilpaMetrics.status === 'On Track'
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                  : user2Metrics.status === 'Almost There'
+                  : shilpaMetrics.status === 'Almost There'
                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                   : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
               }`}>
-                {user2Metrics.status}
+                {shilpaMetrics.status}
               </span>
               <div className="flex items-center gap-1 text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-full border border-amber-500/20">
                 <Flame className="w-3.5 h-3.5" />
-                <span>{user2Metrics.streak}d</span>
+                <span>{shilpaMetrics.streak}d</span>
               </div>
             </div>
           </div>
@@ -235,7 +232,7 @@ export const Together: React.FC = () => {
                   <Clock className="w-3.5 h-3.5 text-pink-400" />
                   <span>Today's Study</span>
                 </div>
-                <p className="text-lg font-black text-white">{user2Metrics.todayStudyFormatted}</p>
+                <p className="text-lg font-black text-white">{shilpaMetrics.todayStudyFormatted}</p>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800/80">
@@ -243,17 +240,17 @@ export const Together: React.FC = () => {
                   <HelpCircle className="w-3.5 h-3.5 text-purple-400" />
                   <span>MCQ Accuracy</span>
                 </div>
-                <p className="text-lg font-black text-white">{user2Metrics.todayAccuracy}%</p>
-                <p className="text-[10px] text-slate-400">{user2Metrics.todayQuestionsAttempted} attempted</p>
+                <p className="text-lg font-black text-white">{shilpaMetrics.todayAccuracy}%</p>
+                <p className="text-[10px] text-slate-400">{shilpaMetrics.todayQuestionsAttempted} attempted</p>
               </div>
             </div>
 
             <div>
               <div className="flex items-center justify-between text-xs text-slate-300 font-semibold mb-1.5">
                 <span>Daily Target Goal Completion</span>
-                <span className="text-pink-400 font-bold">{user2Metrics.todayGoalPct}%</span>
+                <span className="text-pink-400 font-bold">{shilpaMetrics.todayGoalPct}%</span>
               </div>
-              <ProgressBar progress={user2Metrics.todayGoalPct} size="md" color="bg-pink-500" />
+              <ProgressBar progress={shilpaMetrics.todayGoalPct} size="md" color="bg-pink-500" />
             </div>
           </div>
         </Card>
@@ -279,8 +276,8 @@ export const Together: React.FC = () => {
                 cursor={{ fill: 'rgba(255, 255, 255, 0.04)' }}
               />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
-              <Bar dataKey={user1Profile.name} fill="#6366f1" radius={[4, 4, 0, 0]} />
-              <Bar dataKey={user2Profile.name} fill="#ec4899" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Siddhartha" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="Shilpa" fill="#ec4899" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

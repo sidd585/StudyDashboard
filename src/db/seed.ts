@@ -31,8 +31,8 @@ export async function seedNepalInitialData(force = false) {
   const now = Date.now();
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-  // 1. SEED USER 1 TARGETS
-  const user1Id = USER_PROFILES.user1.id;
+  // 1. SEED SIDDHARTHA TARGETS
+  const user1Id = USER_PROFILES.siddhartha.id;
   const user1Targets: Target[] = [
     {
       id: 'target-u1-rbbit',
@@ -94,8 +94,8 @@ export async function seedNepalInitialData(force = false) {
     }
   ];
 
-  // 2. SEED USER 2 TARGETS
-  const user2Id = USER_PROFILES.user2.id;
+  // 2. SEED SHILPA TARGETS
+  const user2Id = USER_PROFILES.shilpa.id;
   const user2Targets: Target[] = [
     {
       id: 'target-u2-nrb',

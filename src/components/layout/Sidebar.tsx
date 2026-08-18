@@ -107,12 +107,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
         </div>
 
         <button
-          onClick={() => switchUser(activeProfileKey === 'user1' ? 'user2' : 'user1')}
+          onClick={() => switchUser(activeProfileKey === 'siddhartha' ? 'shilpa' : 'siddhartha')}
           className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors"
-          title="Switch active user profile"
+          title="Switch view between Siddhartha and Shilpa"
         >
           <ArrowLeftRight className="w-3.5 h-3.5 text-brand-400" />
-          <span>Switch to {activeProfileKey === 'user1' ? 'Partner Account' : 'Primary Account'}</span>
+          <span>Switch to {activeProfileKey === 'siddhartha' ? 'Shilpa' : 'Siddhartha'}</span>
         </button>
       </div>
     </aside>

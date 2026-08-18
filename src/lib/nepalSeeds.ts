@@ -184,9 +184,9 @@ export const NEPAL_EXAM_TEMPLATES: Record<string, TargetTemplate> = {
 };
 
 export const INITIAL_USER_CONFIGS = {
-  user1: {
-    name: 'Primary Account',
-    email: 'user1@studydashboard.local',
+  siddhartha: {
+    name: 'Siddhartha',
+    email: 'siddhartha@studydashboard.local',
     targets: [
       { templateKey: 'rbb_it', dailyMinutes: 90, weeklyMinutes: 600, questionGoal: 30 },
       { templateKey: 'nrb_assistant', customName: 'NRB IT Track', dailyMinutes: 60, weeklyMinutes: 450, questionGoal: 25 },
@@ -241,9 +241,9 @@ export const INITIAL_USER_CONFIGS = {
     ]
   },
 
-  user2: {
-    name: 'Study Partner',
-    email: 'user2@studydashboard.local',
+  shilpa: {
+    name: 'Shilpa',
+    email: 'shilpa@studydashboard.local',
     targets: [
       { templateKey: 'nrb_assistant', dailyMinutes: 75, weeklyMinutes: 500, questionGoal: 25 },
       { templateKey: 'rbb_admin', dailyMinutes: 60, weeklyMinutes: 450, questionGoal: 25 },

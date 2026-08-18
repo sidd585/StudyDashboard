@@ -21,11 +21,11 @@ describe('Nepal Exam Templates & User Tracks', () => {
     expect(nrbSubjects).toContain('Economics');
   });
 
-  it('should define separate initial configurations for User 1 and User 2', () => {
-    expect(INITIAL_USER_CONFIGS.user1.name).toBe('Primary Account');
-    expect(INITIAL_USER_CONFIGS.user2.name).toBe('Study Partner');
+  it('should define separate initial configurations for Siddhartha and Shilpa', () => {
+    expect(INITIAL_USER_CONFIGS.siddhartha.name).toBe('Siddhartha');
+    expect(INITIAL_USER_CONFIGS.shilpa.name).toBe('Shilpa');
 
-    expect(INITIAL_USER_CONFIGS.user1.targets.length).toBeGreaterThanOrEqual(4);
-    expect(INITIAL_USER_CONFIGS.user2.targets.length).toBeGreaterThanOrEqual(4);
+    expect(INITIAL_USER_CONFIGS.siddhartha.targets.length).toBeGreaterThanOrEqual(4);
+    expect(INITIAL_USER_CONFIGS.shilpa.targets.length).toBeGreaterThanOrEqual(4);
   });
 });

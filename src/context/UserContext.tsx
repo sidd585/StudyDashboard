@@ -13,10 +13,10 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeProfileKey, setActiveProfileKey] = useState<ActiveUserProfile>(() => {
     const saved = localStorage.getItem('studydashboard_active_user') as ActiveUserProfile;
-    return saved && USER_PROFILES[saved] ? saved : 'user1';
+    return saved && USER_PROFILES[saved] ? saved : 'siddhartha';
   });
 
-  const currentUser = USER_PROFILES[activeProfileKey];
+  const currentUser = USER_PROFILES[activeProfileKey] || USER_PROFILES.siddhartha;
 
   const switchUser = (profile: ActiveUserProfile) => {
     setActiveProfileKey(profile);
