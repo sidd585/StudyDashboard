@@ -26,7 +26,9 @@ export const App: React.FC = () => {
     [currentUser.id]
   ) || [];
 
-  const studyStreak = Math.max(1, Math.min(7, Math.floor(userSessions.length / 2) + 1));
+  const studyStreak = userSessions.length === 0 ? 0 : new Set(
+    userSessions.map(s => new Date(s.startTime).toDateString())
+  ).size;
 
   const handleNavigate = (page: PageId, params?: any) => {
     setActivePracticeSessionId(null);

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { USER_PROFILES, type ActiveUserProfile, type UserProfile } from '../lib/supabase';
-import { seedNepalInitialData } from '../db/seed';
+import { seedNepalInitialData, resetAllProgressToZero } from '../db/seed';
 
 interface UserContextType {
   activeProfileKey: ActiveUserProfile;
@@ -25,11 +25,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    // Check seed version to automatically refresh targets for Siddhartha and Shilpa
-    const SEED_VERSION = 'studyos_nepal_v3_sid_shilpa';
+    // Reset to clean Day 0 state (targets & questions preserved, sessions & streaks reset to 0)
+    const SEED_VERSION = 'studydashboard_clean_day0_v5';
     const lastSeed = localStorage.getItem('studydashboard_seed_version');
     if (lastSeed !== SEED_VERSION) {
-      seedNepalInitialData(true).then(() => {
+      seedNepalInitialData(true).then(async () => {
+        await resetAllProgressToZero('all');
         localStorage.setItem('studydashboard_seed_version', SEED_VERSION);
       });
     } else {

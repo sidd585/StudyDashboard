@@ -61,7 +61,9 @@ export const Together: React.FC = () => {
     const weekSessions = userSessions.filter(s => s.startTime >= weekStart);
     const weekStudyMins = weekSessions.reduce((sum, s) => sum + s.focusedMinutes, 0);
 
-    const streak = Math.max(1, Math.min(7, Math.floor(userSessions.length / 2) + 1));
+    const streak = userSessions.length === 0 ? 0 : new Set(
+      userSessions.map(s => new Date(s.startTime).toDateString())
+    ).size;
 
     const status: 'On Track' | 'Almost There' | 'Needs Attention' =
       todayGoalPct >= 80 ? 'On Track' : todayGoalPct >= 50 ? 'Almost There' : 'Needs Attention';
