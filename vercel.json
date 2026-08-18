@@ -3,10 +3,6 @@
     {
       "path": "/api/cron/daily-summary",
       "schedule": "15 16 * * *"
-    },
-    {
-      "path": "/api/cron/study-reminder",
-      "schedule": "*/15 * * * *"
     }
   ]
 }
