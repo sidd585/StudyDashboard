@@ -241,7 +241,9 @@ export const Together: React.FC = () => {
                   />
                   <div>
                     <h3 className="text-base font-extrabold text-[#172033] dark:text-white">{partnerName}</h3>
-                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Admin Friend</p>
+                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                      {isMainAdmin ? 'Admin Friend' : 'Study Partner (Admin)'}
+                    </p>
                   </div>
                 </div>
                 <Badge variant="neutral">Connected</Badge>

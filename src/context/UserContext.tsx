@@ -52,7 +52,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isSubAdmin = role === 'SUB_ADMIN';
   const isAdminFriend = role === 'FRIEND' || (hasActiveFriendRelationship && !isMainAdmin);
   const canAccessAdmin = isMainAdmin || isSubAdmin;
-  const canAccessTogether = isMainAdmin ? hasActiveFriendRelationship : isAdminFriend;
+  const canAccessTogether = isMainAdmin || role === 'FRIEND' || isAdminFriend || hasActiveFriendRelationship;
 
   return (
     <UserContext.Provider
