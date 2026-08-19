@@ -159,37 +159,40 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   return (
     <div className="space-y-8 animate-fade-in pb-16 max-w-7xl mx-auto">
       {/* ================= HERO: TODAY'S FOCUS ================= */}
-      <div className="relative overflow-hidden rounded-3xl bg-linear-to-br from-brand-600 via-brand-700 to-indigo-900 text-white p-6 sm:p-8 shadow-md">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-brand-50/70 via-slate-50 to-white dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-850 p-6 sm:p-8 border border-brand-200/80 dark:border-slate-800 shadow-sm">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md text-xs font-semibold text-white/90 border border-white/15">
-              <span>● Asia/Kathmandu Active</span>
+          <div className="space-y-2.5 max-w-xl">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-100/80 dark:bg-brand-950/60 text-xs font-bold text-brand-800 dark:text-brand-300 border border-brand-300/60 dark:border-brand-800/80">
+              <span className="w-2 h-2 rounded-full bg-brand-600 dark:bg-brand-400 animate-pulse" />
+              <span>Asia/Kathmandu Time (UTC+5:45)</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
               {timeOfDayGreeting}, {currentUser.name.split(' ')[0]} 👋
             </h1>
-            <p className="text-sm text-brand-100 font-medium">
+
+            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
               {totalStudiedMinutesToday > 0 ? (
                 <>
-                  <span className="font-bold text-white">{formatMins(totalStudiedMinutesToday)}</span> focused today
+                  <span className="font-bold text-brand-700 dark:text-brand-400">{formatMins(totalStudiedMinutesToday)}</span> focused today
                   {remainingMinutes > 0 ? (
-                    <> • <span className="text-white/80">{formatMins(remainingMinutes)} remaining</span> to reach your daily goal</>
+                    <> • <span className="font-bold text-slate-900 dark:text-white">{formatMins(remainingMinutes)} remaining</span> to reach daily goal</>
                   ) : (
-                    <> • <span className="text-emerald-300 font-semibold">🎉 Daily goal achieved!</span></>
+                    <> • <span className="text-emerald-600 dark:text-emerald-400 font-bold">🎉 Daily goal achieved!</span></>
                   )}
                 </>
               ) : (
-                <>You haven't logged any study sessions today. Ready to start?</>
+                <>You haven't logged study focus today. Ready to begin your session?</>
               )}
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <Button
-              variant="secondary"
+              variant="primary"
               size="lg"
-              className="bg-white text-brand-900 hover:bg-slate-100 font-bold shadow-lg border-0"
-              leftIcon={<Play className="w-5 h-5 fill-brand-600 text-brand-600" />}
+              className="font-bold shadow-md text-white"
+              leftIcon={<Play className="w-4 h-4 fill-white" />}
               onClick={() => openTimerModal()}
             >
               Focus Now
@@ -197,8 +200,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Button
               variant="outline"
               size="lg"
-              className="bg-white/10 hover:bg-white/20 text-white border-white/25 font-bold backdrop-blur-md"
-              leftIcon={<BookOpen className="w-5 h-5" />}
+              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 font-bold shadow-xs"
+              leftIcon={<BookOpen className="w-4 h-4 text-brand-600 dark:text-brand-400" />}
               onClick={() => onNavigate('practice')}
             >
               Practice MCQs
@@ -206,8 +209,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Button
               variant="outline"
               size="lg"
-              className="bg-white/10 hover:bg-white/20 text-white border-white/25 font-bold backdrop-blur-md"
-              leftIcon={<FileText className="w-5 h-5" />}
+              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 font-bold shadow-xs"
+              leftIcon={<FileText className="w-4 h-4 text-blue-500" />}
               onClick={() => onNavigate('questions', { openUpload: true })}
             >
               Upload PDF

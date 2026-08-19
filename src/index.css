@@ -17,120 +17,48 @@
 }
 
 /* ==========================================================================
-   SOFTER MODERN LIGHT THEME (DAYLIGHT MODE)
+   STANDARD CLEAN LIGHT THEME
    ========================================================================== */
 html.light,
 html.light body,
 html.light #root,
 html.light .min-h-screen,
 html.light main {
-  background-color: #f8fafc !important;
-  color: #0f172a !important;
+  background-color: #f8fafc;
+  color: #0f172a;
 }
 
 html.light header {
-  background-color: rgba(255, 255, 255, 0.96) !important;
-  border-color: #e2e8f0 !important;
-  color: #0f172a !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04) !important;
+  background-color: rgba(255, 255, 255, 0.95);
+  border-color: #e2e8f0;
+  color: #0f172a;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
 }
 
 html.light aside {
-  background-color: #ffffff !important;
-  border-color: #e2e8f0 !important;
-  color: #0f172a !important;
-  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.02) !important;
+  background-color: #ffffff;
+  border-color: #e2e8f0;
+  color: #0f172a;
+  box-shadow: 1px 0 3px 0 rgba(0, 0, 0, 0.02);
 }
 
 /* Soft Selected Navigation Item in Light Mode */
 html.light aside nav button[class*="bg-brand-600"],
 html.light aside nav button.bg-brand-600 {
-  background-color: #eef2ff !important;
-  color: #4f46e5 !important;
-  border: 1px solid #c7d2fe !important;
-  box-shadow: 0 1px 2px 0 rgba(99, 102, 241, 0.06) !important;
-  font-weight: 600 !important;
+  background-color: #eef2ff;
+  color: #4f46e5;
+  border: 1px solid #c7d2fe;
+  box-shadow: 0 1px 2px 0 rgba(99, 102, 241, 0.06);
+  font-weight: 600;
 }
 
-html.light aside nav button[class*="bg-brand-600"] svg,
-html.light aside nav button.bg-brand-600 svg {
-  color: #6366f1 !important;
-}
-
-/* Cards & Modals in Light Mode */
-html.light [class*="bg-slate-950"],
-html.light [class*="bg-slate-900"] {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #e2e8f0 !important;
-}
-
-html.light [class*="bg-slate-800"] {
-  background-color: #f8fafc !important;
-  color: #1e293b !important;
-  border-color: #e2e8f0 !important;
-}
-
-html.light [class*="border-slate-800"],
-html.light [class*="border-slate-700"] {
-  border-color: #e2e8f0 !important;
-}
-
-html.light [class*="text-white"],
-html.light [class*="text-slate-100"],
-html.light [class*="text-slate-200"],
-html.light h1, html.light h2, html.light h3, html.light h4, html.light h5 {
-  color: #0f172a !important;
-}
-
-html.light [class*="text-slate-300"] {
-  color: #334155 !important;
-}
-
-html.light [class*="text-slate-400"] {
-  color: #64748b !important;
-}
-
-/* Light Buttons & Controls */
-html.light button.bg-brand-600,
-html.light .bg-brand-600 {
-  background-color: #6366f1 !important;
-  color: #ffffff !important;
-}
-
-html.light button.bg-brand-600:hover,
-html.light .bg-brand-600:hover {
-  background-color: #4f46e5 !important;
-}
-
-html.light .text-brand-400,
-html.light .text-brand-500,
-html.light .text-brand-600 {
-  color: #4f46e5 !important;
-}
-
-html.light .bg-brand-500\/10,
-html.light .bg-brand-500\/20,
-html.light .bg-brand-600\/20 {
-  background-color: #eef2ff !important;
-  color: #4f46e5 !important;
-  border-color: #c7d2fe !important;
-}
-
+/* Form Inputs in Light Mode */
 html.light input,
 html.light select,
 html.light textarea {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border-color: #cbd5e1 !important;
-}
-
-html.light .bg-gradient-to-r.from-indigo-900\/40,
-html.light .bg-gradient-to-r.from-brand-600\/20,
-html.light [class*="from-indigo-900"],
-html.light [class*="from-brand-600/20"] {
-  background: linear-gradient(to right, rgba(99, 102, 241, 0.06), rgba(168, 85, 247, 0.04), #ffffff) !important;
-  border-color: rgba(99, 102, 241, 0.15) !important;
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: #cbd5e1;
 }
 
 /* ==========================================================================
@@ -140,17 +68,7 @@ html.dark body {
   @apply bg-slate-950 text-slate-100;
 }
 
-html.dark header {
-  background-color: rgba(2, 6, 23, 0.85) !important;
-  border-color: #1e293b !important;
-}
-
-html.dark aside {
-  background-color: #020617 !important;
-  border-color: #1e293b !important;
-}
-
-/* Custom Sleek Scrollbar */
+/* Custom Smooth Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -161,39 +79,14 @@ html.dark aside {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(100, 116, 139, 0.25);
-  border-radius: 9999px;
+  @apply bg-slate-300 dark:bg-slate-750 rounded-full;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.5);
+  @apply bg-slate-400 dark:bg-slate-650;
 }
 
-/* Micro animations & transitions */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.animate-slide-up {
-  animation: slideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+/* Standard Focus Ring */
+*:focus-visible {
+  @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-slate-50 dark:ring-offset-slate-950;
 }
