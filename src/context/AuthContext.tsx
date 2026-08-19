@@ -240,7 +240,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const role: ApplicationRole = profile?.role || 'USER';
   const status: AccountStatus = profile?.status || 'PENDING_APPROVAL';
-  const isApproved: boolean = status === 'ACTIVE' || role === 'MAIN_ADMIN';
+  const isApproved: boolean = status === 'ACTIVE' || role === 'MAIN_ADMIN' || role === 'SUB_ADMIN' || role === 'FRIEND';
 
   return (
     <AuthContext.Provider

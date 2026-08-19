@@ -20,67 +20,84 @@ export const relationshipService = {
     return data || [];
   },
 
-  // Check if current user has an active partner (either as Super Admin or as Admin Friend)
-  async getActivePartner(): Promise<{ partnerUserId: string; isSuperAdmin: boolean; partnerName?: string } | null> {
+  // Get all active study partners (supports 1, 2, 3, 4, 5+ friends)
+  async getAllActivePartners(): Promise<{
+    partnerUserId: string;
+    partnerName: string;
+    avatarUrl: string;
+    role: string;
+    isSuperAdmin: boolean;
+  }[]> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) return [];
 
-    // 1. Check explicit study_relationships table
-    const { data } = await supabase
-      .from('study_relationships')
-      .select('*')
-      .or(`owner_user_id.eq.${user.id},friend_user_id.eq.${user.id}`)
-      .eq('active', true)
-      .limit(1)
-      .maybeSingle();
-
-    if (data) {
-      const isSuperAdmin = data.owner_user_id === user.id;
-      const partnerUserId = isSuperAdmin ? data.friend_user_id : data.owner_user_id;
-      return { partnerUserId, isSuperAdmin };
-    }
-
-    // 2. Fallback: Pair MAIN_ADMIN and any FRIEND directly via profiles
     const { data: myProfile } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .maybeSingle();
 
-    if (myProfile?.role === 'FRIEND') {
-      // Find the Main Admin
-      const { data: adminProfile } = await supabase
-        .from('profiles')
-        .select('id, display_name')
-        .eq('role', 'MAIN_ADMIN')
-        .limit(1)
-        .maybeSingle();
+    const isMainAdmin = myProfile?.role === 'MAIN_ADMIN';
 
-      if (adminProfile) {
-        return {
-          partnerUserId: adminProfile.id,
-          isSuperAdmin: false,
-          partnerName: adminProfile.display_name,
-        };
-      }
-    } else if (myProfile?.role === 'MAIN_ADMIN') {
-      // Find the Friend
-      const { data: friendProfile } = await supabase
-        .from('profiles')
-        .select('id, display_name')
-        .eq('role', 'FRIEND')
-        .limit(1)
-        .maybeSingle();
+    // 1. Fetch from study_relationships table
+    const { data: rels } = await supabase
+      .from('study_relationships')
+      .select('*')
+      .or(`owner_user_id.eq.${user.id},friend_user_id.eq.${user.id}`)
+      .eq('active', true);
 
-      if (friendProfile) {
-        return {
-          partnerUserId: friendProfile.id,
-          isSuperAdmin: true,
-          partnerName: friendProfile.display_name,
-        };
-      }
+    const partnerUserIds = new Set<string>();
+    (rels || []).forEach(r => {
+      const id = r.owner_user_id === user.id ? r.friend_user_id : r.owner_user_id;
+      if (id && id !== user.id) partnerUserIds.add(id);
+    });
+
+    // 2. Also fetch all users with role 'FRIEND' or 'SUB_ADMIN' if main admin, or main admins & friends if friend
+    if (isMainAdmin) {
+      const { data: friends } = await supabase
+        .from('profiles')
+        .select('id, display_name, avatar_url, role')
+        .in('role', ['FRIEND', 'SUB_ADMIN'])
+        .neq('id', user.id);
+
+      (friends || []).forEach(f => partnerUserIds.add(f.id));
+    } else {
+      const { data: adminsAndFriends } = await supabase
+        .from('profiles')
+        .select('id, display_name, avatar_url, role')
+        .in('role', ['MAIN_ADMIN', 'FRIEND'])
+        .neq('id', user.id);
+
+      (adminsAndFriends || []).forEach(f => partnerUserIds.add(f.id));
     }
 
+    if (partnerUserIds.size === 0) return [];
+
+    // Fetch details for all partners
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, display_name, avatar_url, role')
+      .in('id', Array.from(partnerUserIds));
+
+    return (profiles || []).map(p => ({
+      partnerUserId: p.id,
+      partnerName: p.display_name,
+      avatarUrl: p.avatar_url || (p.display_name?.toLowerCase().includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png'),
+      role: p.role,
+      isSuperAdmin: p.role === 'MAIN_ADMIN',
+    }));
+  },
+
+  // Check if current user has an active partner (either as Super Admin or as Admin Friend)
+  async getActivePartner(): Promise<{ partnerUserId: string; isSuperAdmin: boolean; partnerName?: string } | null> {
+    const all = await this.getAllActivePartners();
+    if (all.length > 0) {
+      return {
+        partnerUserId: all[0].partnerUserId,
+        isSuperAdmin: all[0].isSuperAdmin,
+        partnerName: all[0].partnerName,
+      };
+    }
     return null;
   },
 
