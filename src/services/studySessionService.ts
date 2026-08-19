@@ -56,24 +56,44 @@ export const studySessionService = {
     const now = new Date();
     const startTime = new Date(now.getTime() - durationSeconds * 1000);
 
+    const payload: any = {
+      user_id: user.id,
+      course_id: courseId,
+      topic_id: topicId || null,
+      started_at: startTime.toISOString(),
+      ended_at: now.toISOString(),
+      duration_seconds: durationSeconds,
+      status: 'COMPLETED',
+      note: note || null,
+    };
+
     const { data, error } = await supabase
       .from('study_sessions')
-      .insert({
+      .insert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.warn('Initial session insert note, retrying minimal:', error.message);
+      const minimalPayload = {
         user_id: user.id,
         course_id: courseId,
         topic_id: topicId || null,
         started_at: startTime.toISOString(),
         ended_at: now.toISOString(),
         duration_seconds: durationSeconds,
-        status: 'COMPLETED',
-        note: note || null,
-      })
-      .select()
-      .single();
+      };
+      const { data: fbData, error: fbError } = await supabase
+        .from('study_sessions')
+        .insert(minimalPayload)
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Error recording study session:', error);
-      return null;
+      if (fbError) {
+        console.error('Error recording study session fallback:', fbError);
+        return null;
+      }
+      return fbData;
     }
     return data;
   },

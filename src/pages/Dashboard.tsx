@@ -17,8 +17,23 @@ import {
   ChevronRight,
   BookOpen,
   Plus,
+  BarChart3,
+  Flame,
+  CheckCircle2,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
+} from 'recharts';
 import type { PageId } from '../components/layout/Sidebar';
 
 interface DashboardProps {
@@ -40,7 +55,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   // Metrics data
   const [todaySessions, setTodaySessions] = useState<CloudStudySession[]>([]);
+  const [weeklySessions, setWeeklySessions] = useState<CloudStudySession[]>([]);
   const [todayPlannerSessions, setTodayPlannerSessions] = useState<CloudPlannerSession[]>([]);
+
+  // Chart view toggle ('weekly' | 'course')
+  const [chartView, setChartView] = useState<'weekly' | 'course'>('weekly');
 
   // Live Asia/Kathmandu Clock
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -58,20 +77,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
     async function loadDashboardData() {
       try {
-        const [loadedCourses, todaySess, plannerSess] = await Promise.all([
+        const [loadedCourses, todaySess, weekSess, plannerSess] = await Promise.all([
           courseService.getCourses(),
           studySessionService.getTodaySessions(),
+          studySessionService.getLast7DaysSessions(),
           plannerService.getPlannerSessions(),
         ]);
 
         if (!isMounted) return;
 
         setCourses(loadedCourses);
-        if (loadedCourses.length > 0) {
+        if (loadedCourses.length > 0 && !selectedCourseId) {
           setSelectedCourseId(loadedCourses[0].id);
         }
 
         setTodaySessions(todaySess);
+        setWeeklySessions(weekSess);
 
         // Filter planner sessions for TODAY
         const todayDateStr = format(new Date(), 'yyyy-MM-dd');
@@ -140,6 +161,47 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
     const courseSessions = todaySessions.filter(s => s.course_id === courseId);
     return Math.round(courseSessions.reduce((sum, s) => sum + s.duration_seconds, 0) / 60);
   };
+
+  // Weekly 7-Day Chart Data
+  const weeklyChartData = useMemo(() => {
+    const days = [];
+    const allSessions = [...weeklySessions, ...todaySessions];
+    // Deduplicate sessions by id
+    const uniqueMap = new Map<string, CloudStudySession>();
+    allSessions.forEach(s => uniqueMap.set(s.id, s));
+    const deduped = Array.from(uniqueMap.values());
+
+    for (let i = 6; i >= 0; i--) {
+      const d = subDays(new Date(), i);
+      const dateStr = format(d, 'yyyy-MM-dd');
+      const dayLabel = format(d, 'EEE'); // Mon, Tue, etc.
+
+      const daySessions = deduped.filter(s => s.started_at && s.started_at.startsWith(dateStr));
+      const studiedMins = Math.round(daySessions.reduce((acc, s) => acc + s.duration_seconds, 0) / 60);
+
+      days.push({
+        day: dayLabel,
+        date: dateStr,
+        studied: studiedMins,
+        target: totalDailyTargetMinutes || 60,
+      });
+    }
+    return days;
+  }, [weeklySessions, todaySessions, totalDailyTargetMinutes]);
+
+  // Course Breakdown Chart Data
+  const courseBreakdownData = useMemo(() => {
+    return courses.map(c => {
+      const studied = getCourseStudyMinutesToday(c.id);
+      return {
+        name: c.name.length > 15 ? `${c.name.substring(0, 15)}...` : c.name,
+        fullName: c.name,
+        studied: studied,
+        target: c.daily_goal_minutes || 60,
+        color: c.color || '#5b5bd6',
+      };
+    });
+  }, [courses, todaySessions]);
 
   // Time format helper
   const formatMins = (mins: number) => {
@@ -258,7 +320,135 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </Card>
       </div>
 
-      {/* 3. User's Created Courses Section */}
+      {/* 3. STUDY PROGRESS GRAPH & ANALYTICS SECTION */}
+      <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-base font-bold text-[#101828] dark:text-[#f8f9fc] flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-[#5b5bd6]" />
+              <span>Study Progress Analytics & Activity Graph</span>
+            </h2>
+            <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+              Daily focus minutes tracking vs target over the last 7 days
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 bg-[#f8fafc] dark:bg-[#181d2f] p-1 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d] self-start sm:self-auto">
+            <button
+              onClick={() => setChartView('weekly')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
+                chartView === 'weekly'
+                  ? 'bg-[#5b5bd6] text-white shadow-xs'
+                  : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
+              }`}
+            >
+              7-Day Trend
+            </button>
+            <button
+              onClick={() => setChartView('course')}
+              className={`px-3 py-1 text-xs font-bold rounded-lg transition-colors ${
+                chartView === 'course'
+                  ? 'bg-[#5b5bd6] text-white shadow-xs'
+                  : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
+              }`}
+            >
+              Course Breakdown
+            </button>
+          </div>
+        </div>
+
+        {/* Chart Container */}
+        <div className="h-64 sm:h-72 w-full pt-2">
+          {chartView === 'weekly' ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={weeklyChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorStudied" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#5b5bd6" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="#5b5bd6" stopOpacity={0.0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                  axisLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
+                  tickLine={false}
+                />
+                <YAxis
+                  unit="m"
+                  tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#181d2f',
+                    border: '1px solid #2b334d',
+                    borderRadius: '12px',
+                    color: '#f8f9fc',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}
+                  formatter={(value: any, name: string) => [
+                    `${value} mins`,
+                    name === 'studied' ? 'Focused Time' : 'Daily Target',
+                  ]}
+                  labelFormatter={(label: string, payload: any[]) => {
+                    const item = payload?.[0]?.payload;
+                    return item ? `${item.day} (${item.date})` : label;
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="studied"
+                  stroke="#5b5bd6"
+                  strokeWidth={3}
+                  fillOpacity={1}
+                  fill="url(#colorStudied)"
+                  name="studied"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={courseBreakdownData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#334155" opacity={0.15} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                  axisLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
+                  tickLine={false}
+                />
+                <YAxis
+                  unit="m"
+                  tick={{ fill: '#64748b', fontSize: 11, fontWeight: 600 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#181d2f',
+                    border: '1px solid #2b334d',
+                    borderRadius: '12px',
+                    color: '#f8f9fc',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                  }}
+                  formatter={(value: any, name: string) => [
+                    `${value} mins`,
+                    name === 'studied' ? "Today's Study" : 'Target',
+                  ]}
+                />
+                <Bar dataKey="studied" fill="#5b5bd6" radius={[6, 6, 0, 0]} name="studied" />
+                <Bar dataKey="target" fill="#0284c7" opacity={0.4} radius={[6, 6, 0, 0]} name="target" />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </Card>
+
+      {/* 4. User's Created Courses Section */}
       <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -343,7 +533,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         )}
       </Card>
 
-      {/* 4. Quick Study Launcher */}
+      {/* 5. Quick Study Launcher */}
       <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
         <div>
           <h2 className="text-base font-bold text-[#101828] dark:text-[#f8f9fc]">Quick Focus Launcher</h2>
@@ -415,7 +605,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         ) : null}
       </Card>
 
-      {/* 5. Today's Study Plan */}
+      {/* 6. Today's Study Plan */}
       <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
         <div className="flex items-center justify-between">
           <div>
@@ -448,21 +638,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                       <span className="text-xs font-bold text-[#5b5bd6] dark:text-[#8282ea]">
                         {course?.name || 'Course'}
                       </span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#eef2f6] dark:bg-[#1f2538] text-[#64748b]">
-                        {format(new Date(plan.start_time), 'h:mm a')}
+                      <span className="text-[10px] font-mono text-[#64748b]">
+                        {plan.duration_minutes}m target
                       </span>
                     </div>
-                    <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">{plan.title}</h3>
-                    <p className="text-[11px] text-[#64748b]">
-                      Duration: {plan.duration_minutes}m
+                    <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{plan.title}</h4>
+                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                      {plan.start_time ? new Date(plan.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : ''}
+                      {plan.end_time ? ` - ${new Date(plan.end_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : ''}
                     </p>
                   </div>
 
                   <Button
-                    variant="outline"
+                    variant="primary"
                     size="sm"
-                    className="w-full font-bold text-xs bg-white dark:bg-[#141824] text-[#5b5bd6] dark:text-[#8282ea] border-[#e2e8f0] dark:border-[#2b334d] hover:bg-[#5b5bd6] hover:text-white"
-                    leftIcon={<Play className="w-3 h-3 fill-current" />}
+                    className="w-full text-xs font-bold bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white shadow-xs"
+                    leftIcon={<Play className="w-3.5 h-3.5 fill-white" />}
                     onClick={() => handleStartPlannerSession(plan)}
                   >
                     Start Focus
@@ -472,16 +663,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             })}
           </div>
         ) : (
-          <div className="py-8 text-center text-xs text-[#64748b] border border-dashed border-[#e2e8f0] dark:border-[#23293d] rounded-xl space-y-2">
-            <p className="font-medium">Nothing scheduled for today yet.</p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-xs font-bold bg-white dark:bg-[#181d2f] text-[#5b5bd6] border-[#e2e8f0] dark:border-[#2b334d]"
-              onClick={() => onNavigate('planner')}
-            >
-              Plan Today's Study
-            </Button>
+          <div className="py-6 text-center text-xs text-[#64748b]">
+            No study sessions scheduled for today in your planner.
           </div>
         )}
       </Card>
