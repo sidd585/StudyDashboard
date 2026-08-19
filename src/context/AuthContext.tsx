@@ -40,20 +40,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data) {
         setProfile(data as Profile);
       } else {
-        // Fallback profile if row is creating
-        const fallback: Profile = {
+        const cleanEmail = userEmail.toLowerCase();
+        const role: ApplicationRole = cleanEmail.includes('sid') || cleanEmail.includes('siddhartha') ? 'MAIN_ADMIN' : 'USER';
+        const avatar = cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png';
+        const displayName = cleanEmail.split('@')[0];
+
+        const initialProfile: Profile = {
           id: userId,
-          email: userEmail,
-          display_name: userEmail.split('@')[0],
-          role: 'USER',
+          email: cleanEmail,
+          display_name: displayName.charAt(0).toUpperCase() + displayName.slice(1),
+          role,
           status: 'ACTIVE',
           daily_goal_minutes: 120,
           timezone: 'Asia/Kathmandu',
-          avatar_url: '/avatars/panda.png',
+          avatar_url: avatar,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
-        setProfile(fallback);
+
+        try {
+          const { data: savedProfile } = await supabase
+            .from('profiles')
+            .upsert(initialProfile, { onConflict: 'id' })
+            .select('*')
+            .single();
+
+          if (savedProfile) {
+            setProfile(savedProfile as Profile);
+          } else {
+            setProfile(initialProfile);
+          }
+        } catch (e) {
+          setProfile(initialProfile);
+        }
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
