@@ -164,6 +164,7 @@ export const Settings: React.FC = () => {
       if (success) {
         alert('Your study progress and attempt history have been reset.');
         setIsResetProgressModalOpen(false);
+        setTimeout(() => window.location.reload(), 300);
       } else {
         alert('Failed to reset progress.');
       }
@@ -182,6 +183,7 @@ export const Settings: React.FC = () => {
         alert('All your study data (courses, questions, planner) have been reset.');
         setIsResetDataModalOpen(false);
         setResetConfirmInput('');
+        setTimeout(() => window.location.reload(), 300);
       } else {
         alert('Failed to reset study data.');
       }

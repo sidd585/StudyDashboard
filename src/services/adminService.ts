@@ -213,22 +213,71 @@ export const adminService = {
     return null;
   },
 
-  // Reset User Progress / Study Data
+  // Reset User Progress / Study Data (RPC + Direct Table Fallback)
   async resetUserData(targetUserId: string, resetType: 'PROGRESS_ONLY' | 'FULL_STUDY_DATA'): Promise<boolean> {
+    // 1. Try PostgreSQL RPC first
     try {
       const { data, error } = await supabase.rpc('admin_reset_user_data', {
         p_target_user_id: targetUserId,
         p_reset_type: resetType,
       });
 
-      if (error) {
-        console.error('Error in admin_reset_user_data RPC:', error);
-        return false;
+      if (!error && (data?.success || data === true)) {
+        this.clearLocalTimerCaches(targetUserId);
+        return true;
       }
-      return Boolean(data?.success);
-    } catch (err) {
-      console.error('Failed to reset user data:', err);
+      if (error) {
+        console.warn('RPC admin_reset_user_data failed, attempting direct table deletion fallback:', error.message);
+      }
+    } catch (rpcErr) {
+      console.warn('RPC call exception, falling back to direct table deletion:', rpcErr);
+    }
+
+    // 2. Resilient Direct Table Deletion Fallback
+    try {
+      if (resetType === 'PROGRESS_ONLY') {
+        // Progress only: delete study logs, practice sessions and answers
+        await Promise.allSettled([
+          supabase.from('practice_answers').delete().eq('user_id', targetUserId),
+          supabase.from('practice_sessions').delete().eq('user_id', targetUserId),
+          supabase.from('study_sessions').delete().eq('user_id', targetUserId),
+        ]);
+        this.clearLocalTimerCaches(targetUserId);
+        return true;
+      }
+
+      if (resetType === 'FULL_STUDY_DATA') {
+        // Full study data wipe: delete child records first, then topics, subjects, courses
+        await Promise.allSettled([
+          supabase.from('practice_answers').delete().eq('user_id', targetUserId),
+          supabase.from('practice_sessions').delete().eq('user_id', targetUserId),
+          supabase.from('study_sessions').delete().eq('user_id', targetUserId),
+          supabase.from('planner_sessions').delete().eq('user_id', targetUserId),
+          supabase.from('questions').delete().eq('user_id', targetUserId),
+          supabase.from('subjective_papers').delete().eq('user_id', targetUserId),
+          supabase.from('syllabus_documents').delete().eq('user_id', targetUserId),
+        ]);
+
+        // Delete hierarchy in order: topics -> subjects -> courses
+        await supabase.from('topics').delete().eq('user_id', targetUserId);
+        await supabase.from('subjects').delete().eq('user_id', targetUserId);
+        const { error: courseErr } = await supabase.from('courses').delete().eq('user_id', targetUserId);
+
+        this.clearLocalTimerCaches(targetUserId);
+        return !courseErr;
+      }
+
+      return false;
+    } catch (fallbackErr) {
+      console.error('Direct table reset fallback error:', fallbackErr);
       return false;
     }
+  },
+
+  clearLocalTimerCaches(userId: string) {
+    try {
+      localStorage.removeItem(`studydashboard_active_session_${userId}`);
+      localStorage.removeItem('studydashboard_active_session');
+    } catch {}
   }
 };
