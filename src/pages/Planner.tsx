@@ -54,7 +54,7 @@ export const Planner: React.FC = () => {
     if (!selectedTargetId || !title.trim()) return;
 
     const id = `sched-${Date.now()}`;
-    await db.studySchedules.put({
+    const newSchedule: StudySchedule = {
       id,
       userId: currentUser.id,
       targetId: selectedTargetId,
@@ -67,7 +67,30 @@ export const Planner: React.FC = () => {
       isCompleted: false,
       emailReminderSent: false,
       createdAt: Date.now(),
-    });
+    };
+
+    await db.studySchedules.put(newSchedule);
+
+    // Register with background email scheduler
+    try {
+      const targetObj = targets.find(t => t.id === selectedTargetId);
+      await fetch('http://127.0.0.1:8000/api/scheduler/register-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          recipientEmail: currentUser.email,
+          targetName: targetObj?.name || title.trim(),
+          date,
+          startTime,
+          durationMinutes,
+        }),
+      });
+    } catch (e) {
+      console.warn('Backend scheduler offline, local notification only:', e);
+    }
 
     setTitle('');
     setNotes('');

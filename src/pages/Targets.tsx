@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db';
 import { useUser } from '../context/UserContext';
-import { NEPAL_EXAM_TEMPLATES } from '../lib/nepalSeeds';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -18,6 +17,8 @@ import {
   FileText,
   CheckCircle2,
   Layers,
+  Sparkles,
+  Zap,
 } from 'lucide-react';
 import type { Target, Subject, Topic, TargetType } from '../types';
 
@@ -50,6 +51,8 @@ export const Targets: React.FC = () => {
     dailyGoalMinutes: number;
     weeklyGoalMinutes: number;
     targetQuestionGoal: number;
+    syllabusTemplate: 'none' | 'banking_commercial' | 'rbbit' | 'sanstha' | 'paste';
+    customSyllabusText: string;
   }>({
     name: '',
     type: 'Competitive Exam',
@@ -59,6 +62,8 @@ export const Targets: React.FC = () => {
     dailyGoalMinutes: 60,
     weeklyGoalMinutes: 400,
     targetQuestionGoal: 25,
+    syllabusTemplate: 'banking_commercial',
+    customSyllabusText: '',
   });
 
   // Subject & Topic Form
@@ -100,6 +105,144 @@ export const Targets: React.FC = () => {
     [selectedSubjectId]
   ) || [];
 
+  // Helper to auto-create syllabus structure for a target
+  const autoCreateSyllabusForTarget = async (
+    targetId: string,
+    template: 'banking_commercial' | 'rbbit' | 'sanstha' | 'custom',
+    customText?: string
+  ) => {
+    const now = Date.now();
+
+    if (template === 'banking_commercial') {
+      const subId = `sub-bank-core-${now}`;
+      await db.subjects.put({
+        id: subId,
+        userId: currentUser.id,
+        targetId,
+        name: 'Banking & Financial Management',
+        description: 'Standard Nepal Banking Curriculum (Commercial Banks, BAFIA, Risk, Digital Banking)',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const bankTopics = [
+        { name: '1. Financial Institutions & Banking Structure in Nepal', desc: 'Commercial Banks, Development Banks, Finance Companies, Infrastructure Bank' },
+        { name: '2. Banking Laws & Regulations', desc: 'NRB Act 2058, BAFIA 2073, AML/CFT Act 2064, Banking Offence Act' },
+        { name: '3. Credit, Liquidity & Capital Management', desc: 'CD Ratio, CRR, SLR, Base Rate, Loan Loss Provisioning, Basel III' },
+        { name: '4. Financial Accounting & Auditing', desc: 'Balance Sheet, Trial Balance, NFRS, Internal Audit & Controls' },
+        { name: '5. Digital Banking & Electronic Payments', desc: 'ConnectIPS, RTGS, SWIFT, Mobile Banking, QR Codes, CBDC' },
+        { name: '6. Organizational Behavior & Customer Service', desc: 'Job Motivation, Communication Skills, Grievance Handling, KYC' },
+      ];
+
+      for (let i = 0; i < bankTopics.length; i++) {
+        await db.topics.put({
+          id: `top-bank-${now}-${i}`,
+          userId: currentUser.id,
+          targetId,
+          subjectId: subId,
+          name: bankTopics[i].name,
+          description: bankTopics[i].desc,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (template === 'rbbit') {
+      const subId = `sub-rbbit-${now}`;
+      await db.subjects.put({
+        id: subId,
+        userId: currentUser.id,
+        targetId,
+        name: 'Paper II: IT & Management',
+        description: 'Official 6-Part Curriculum for RBB IT Assistant Level 5',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const rbb6Parts = [
+        { name: '1. Introduction of Computer', desc: 'Types of Computers, Internet/Email, Physical Security, AI/ML/Blockchain' },
+        { name: '2. Computer Architecture', desc: 'Registers, Memory Management, Hard Disk, CPU Architecture, I/O Management' },
+        { name: '3. Communication and Computer Network Technologies', desc: 'Networking Devices, Switching, IPv4/IPv6, Security, Cryptography' },
+        { name: '4. Operating System and Information Systems', desc: 'Process Management, Scheduling, DOS/UNIX/Windows, OS Security Threats' },
+        { name: '5. Database Management System & Web Technology', desc: 'Tables, Normalization (1NF-BCNF), Indexing, Data Warehouse, HTML/CSS' },
+        { name: '6. Cybersecurity and IT Policies', desc: 'Access Control, Malware, ICT Policy 2072, NRB Guidelines' },
+      ];
+
+      for (let i = 0; i < rbb6Parts.length; i++) {
+        await db.topics.put({
+          id: `top-rbb-${now}-${i}`,
+          userId: currentUser.id,
+          targetId,
+          subjectId: subId,
+          name: rbb6Parts[i].name,
+          description: rbb6Parts[i].desc,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (template === 'sanstha') {
+      const subId = `sub-sanstha-${now}`;
+      await db.subjects.put({
+        id: subId,
+        userId: currentUser.id,
+        targetId,
+        name: 'Pre-Qualifying General Curriculum',
+        description: 'Lok Sewa Aayog Unified 9-Part Curriculum',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const sanstha9Parts = [
+        '1. Geography, Environment & Population',
+        '2. History and Culture of Nepal',
+        '3. Economic Aspects and Development',
+        '4. Governance and Constitution of Nepal',
+        '5. International Affairs & Organizations',
+        '6. Science, Public Health & Current Affairs',
+        '7. Office & Public Management',
+        '8. Applied Mathematics',
+        '9. Knowledge about Public Enterprises',
+      ];
+
+      for (let i = 0; i < sanstha9Parts.length; i++) {
+        await db.topics.put({
+          id: `top-san-${now}-${i}`,
+          userId: currentUser.id,
+          targetId,
+          subjectId: subId,
+          name: sanstha9Parts[i],
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (customText && customText.trim()) {
+      const subId = `sub-custom-${now}`;
+      await db.subjects.put({
+        id: subId,
+        userId: currentUser.id,
+        targetId,
+        name: 'Curriculum & Topics',
+        description: 'Extracted from syllabus text',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const lines = customText.split('\n').map(l => l.trim()).filter(Boolean);
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].length < 3) continue;
+        await db.topics.put({
+          id: `top-cust-${now}-${i}`,
+          userId: currentUser.id,
+          targetId,
+          subjectId: subId,
+          name: lines[i].replace(/^[0-9]+[\.\)]\s+/, '').trim(),
+          description: lines[i + 1] && !/^[0-9]+[\.\)]/.test(lines[i + 1]) ? lines[i + 1] : undefined,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+  };
+
   // Target CRUD
   const handleSaveTarget = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,6 +267,15 @@ export const Targets: React.FC = () => {
       updatedAt: now,
     });
 
+    // Auto-create syllabus structure if chosen on new target
+    if (!targetForm.id && targetForm.syllabusTemplate !== 'none') {
+      if (targetForm.syllabusTemplate === 'paste') {
+        await autoCreateSyllabusForTarget(id, 'custom', targetForm.customSyllabusText);
+      } else {
+        await autoCreateSyllabusForTarget(id, targetForm.syllabusTemplate);
+      }
+    }
+
     setIsTargetModalOpen(false);
     setSelectedTargetId(id);
   };
@@ -139,18 +291,36 @@ export const Targets: React.FC = () => {
       dailyGoalMinutes: target.dailyGoalMinutes,
       weeklyGoalMinutes: target.weeklyGoalMinutes,
       targetQuestionGoal: target.targetQuestionGoal,
+      syllabusTemplate: 'none',
+      customSyllabusText: '',
     });
     setIsTargetModalOpen(true);
   };
 
   const handleDeleteTarget = async (targetId: string) => {
-    if (window.confirm('Are you sure you want to delete this target and all its subjects, topics, and questions?')) {
+    if (window.confirm('Are you sure you want to delete this course target and all its subjects, topics, and questions?')) {
       await db.targets.delete(targetId);
       await db.subjects.where('targetId').equals(targetId).delete();
       await db.topics.where('targetId').equals(targetId).delete();
       await db.questions.where('targetId').equals(targetId).delete();
       setSelectedTargetId(null);
     }
+  };
+
+  // Quick 1-Click Auto-generate for Empty Target
+  const handleQuickAutoGenerateSyllabus = async () => {
+    if (!selectedTargetId) return;
+    const tName = activeTarget?.name.toLowerCase() || '';
+    let tmpl: 'banking_commercial' | 'rbbit' | 'sanstha' = 'banking_commercial';
+    if (tName.includes('it') || tName.includes('computer')) {
+      tmpl = 'rbbit';
+    } else if (tName.includes('sanstha') || tName.includes('lok')) {
+      tmpl = 'sanstha';
+    }
+
+    await autoCreateSyllabusForTarget(selectedTargetId, tmpl);
+    setSyllabusUploadSuccess(`Standard syllabus automatically generated for ${activeTarget?.name}!`);
+    setTimeout(() => setSyllabusUploadSuccess(null), 3000);
   };
 
   // Subject CRUD
@@ -197,7 +367,7 @@ export const Targets: React.FC = () => {
     setIsTopicModalOpen(false);
   };
 
-  // Parse and Save Syllabus
+  // Syllabus text import handler
   const handleProcessSyllabusImport = async () => {
     const targetIdToUse = syllabusImportTargetId || selectedTargetId;
     if (!targetIdToUse || !syllabusText.trim()) {
@@ -205,156 +375,14 @@ export const Targets: React.FC = () => {
       return;
     }
 
-    const lines = syllabusText.split('\n').map(l => l.trim()).filter(Boolean);
-    const mainSectionRegex = /^(?:(?:Section|Part|Paper|Unit|Chapter|\d+)[\s\.\:\-\)]+|[0-9]+\.\s+)/i;
-
-    const now = Date.now();
-    const subId = `sub-syllabus-${now}`;
-    
-    // Create main Subject wrapper
-    await db.subjects.put({
-      id: subId,
-      userId: currentUser.id,
-      targetId: targetIdToUse,
-      name: 'Imported Syllabus Curriculum',
-      description: 'Extracted from uploaded syllabus document',
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    // Detect and insert topics
-    let count = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.length < 4) continue;
-
-      if (mainSectionRegex.test(line) || /^[0-9]+[\.\)]\s+/.test(line)) {
-        await db.topics.put({
-          id: `top-syl-${now}-${count}`,
-          userId: currentUser.id,
-          targetId: targetIdToUse,
-          subjectId: subId,
-          name: line.replace(/^[0-9]+[\.\)]\s+/, '').trim(),
-          description: lines[i + 1] && !mainSectionRegex.test(lines[i + 1]) ? lines[i + 1] : undefined,
-          createdAt: now,
-          updatedAt: now,
-        });
-        count++;
-      }
-    }
-
-    // If no numbered lines, split into chunk topics
-    if (count === 0) {
-      const chunks = lines.slice(0, 10);
-      for (let i = 0; i < chunks.length; i++) {
-        await db.topics.put({
-          id: `top-syl-${now}-${i}`,
-          userId: currentUser.id,
-          targetId: targetIdToUse,
-          subjectId: subId,
-          name: chunks[i],
-          createdAt: now,
-          updatedAt: now,
-        });
-        count++;
-      }
-    }
-
+    await autoCreateSyllabusForTarget(targetIdToUse, 'custom', syllabusText);
     setSelectedTargetId(targetIdToUse);
-    setSelectedSubjectId(subId);
-    setSyllabusUploadSuccess(`Successfully extracted and saved ${count} topics to syllabus!`);
+    setSyllabusUploadSuccess('Syllabus imported and topics created successfully!');
     setTimeout(() => {
       setSyllabusUploadSuccess(null);
       setIsSyllabusUploadModalOpen(false);
       setSyllabusText('');
     }, 2000);
-  };
-
-  // 1-Click Load Official Templates
-  const handleLoadOfficialSyllabus = async (templateType: 'rbbit' | 'sanstha' | 'nrb') => {
-    const targetIdToUse = syllabusImportTargetId || selectedTargetId;
-    if (!targetIdToUse) {
-      alert('Please select a course target first.');
-      return;
-    }
-
-    const now = Date.now();
-    const subId = `sub-official-${now}`;
-
-    if (templateType === 'rbbit') {
-      await db.subjects.put({
-        id: subId,
-        userId: currentUser.id,
-        targetId: targetIdToUse,
-        name: 'Paper II: IT & Management (Official)',
-        description: 'RBB IT Assistant Level 5 Official 6-Part Curriculum',
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const rbb6Parts = [
-        '1. Introduction of Computer (Types, Internet/Email, Physical Security, AI/ML)',
-        '2. Computer Architecture (Registers, Hard Disk, CPU, I/O Management)',
-        '3. Communication and Computer Network Technologies (Networking Devices, Switching, IPv4/IPv6, Security)',
-        '4. Operating System and Information Systems (Process Scheduling, DOS/UNIX/Windows, OS Security)',
-        '5. Database Management System & Web Technology (Normalization, Indexing, Data Warehouse, HTML/CSS)',
-        '6. Cybersecurity and IT Policies (Access Control, Malware, ICT Policy 2072, NRB Guidelines)',
-      ];
-
-      for (let i = 0; i < rbb6Parts.length; i++) {
-        await db.topics.put({
-          id: `top-rbb-${now}-${i}`,
-          userId: currentUser.id,
-          targetId: targetIdToUse,
-          subjectId: subId,
-          name: rbb6Parts[i],
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    } else if (templateType === 'sanstha') {
-      await db.subjects.put({
-        id: subId,
-        userId: currentUser.id,
-        targetId: targetIdToUse,
-        name: 'Pre-Qualifying Curriculum (Official)',
-        description: 'Lok Sewa Aayog Unified 9-Part Curriculum',
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const sanstha9Parts = [
-        '1. Geography, Environment & Population',
-        '2. History and Culture of Nepal',
-        '3. Economic Aspects and Development',
-        '4. Governance and Constitution of Nepal',
-        '5. International Affairs & Organizations (UN, SAARC, BIMSTEC)',
-        '6. Science, Public Health & Current Affairs',
-        '7. Office & Public Management (Tippani, Filing, Public Charter)',
-        '8. Applied Mathematics (Percentages, Ratios, Profit & Loss, Interest)',
-        '9. Knowledge about Public Enterprises & Financial Regulatory Authorities',
-      ];
-
-      for (let i = 0; i < sanstha9Parts.length; i++) {
-        await db.topics.put({
-          id: `top-san-${now}-${i}`,
-          userId: currentUser.id,
-          targetId: targetIdToUse,
-          subjectId: subId,
-          name: sanstha9Parts[i],
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    }
-
-    setSelectedTargetId(targetIdToUse);
-    setSelectedSubjectId(subId);
-    setSyllabusUploadSuccess('Official syllabus loaded successfully!');
-    setTimeout(() => {
-      setSyllabusUploadSuccess(null);
-      setIsSyllabusUploadModalOpen(false);
-    }, 1500);
   };
 
   return (
@@ -364,7 +392,7 @@ export const Targets: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Courses & Syllabus</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Manage your courses, official syllabi, and multi-part topic structures.
+            Manage your courses, auto-generate syllabus structures, and organize topic parts.
           </p>
         </div>
 
@@ -392,6 +420,8 @@ export const Targets: React.FC = () => {
                 dailyGoalMinutes: 60,
                 weeklyGoalMinutes: 400,
                 targetQuestionGoal: 25,
+                syllabusTemplate: 'banking_commercial',
+                customSyllabusText: '',
               });
               setIsTargetModalOpen(true);
             }}
@@ -400,6 +430,13 @@ export const Targets: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {syllabusUploadSuccess && (
+        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>{syllabusUploadSuccess}</span>
+        </div>
+      )}
 
       {/* 3-Column Hierarchy Explorer (Target -> Subject -> Topic) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -421,6 +458,8 @@ export const Targets: React.FC = () => {
                   dailyGoalMinutes: 60,
                   weeklyGoalMinutes: 400,
                   targetQuestionGoal: 25,
+                  syllabusTemplate: 'banking_commercial',
+                  customSyllabusText: '',
                 });
                 setIsTargetModalOpen(true);
               }}
@@ -497,8 +536,41 @@ export const Targets: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto space-y-2 py-3">
             {subjects.length === 0 ? (
-              <div className="text-center py-12 text-slate-400 text-xs">
-                {selectedTargetId ? 'No subjects added. Click "+ Add" or "Upload Syllabus".' : 'Select a course first.'}
+              <div className="text-center py-10 px-3 space-y-3">
+                <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    No syllabus subjects yet for {activeTarget?.name || 'this course'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Generate the standard syllabus structure in 1 click or paste your outline.
+                  </p>
+                </div>
+                <div className="space-y-2 pt-2">
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full text-xs font-bold"
+                    leftIcon={<Zap className="w-3.5 h-3.5 fill-white" />}
+                    onClick={handleQuickAutoGenerateSyllabus}
+                  >
+                    ⚡ Auto-Generate Syllabus Structure
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs font-semibold"
+                    leftIcon={<Upload className="w-3.5 h-3.5" />}
+                    onClick={() => {
+                      setSyllabusImportTargetId(selectedTargetId || '');
+                      setIsSyllabusUploadModalOpen(true);
+                    }}
+                  >
+                    📄 Upload / Paste Syllabus
+                  </Button>
+                </div>
               </div>
             ) : (
               subjects.map(subject => {
@@ -544,7 +616,7 @@ export const Targets: React.FC = () => {
           <div className="flex-1 overflow-y-auto space-y-2 py-3">
             {topics.length === 0 ? (
               <div className="text-center py-12 text-slate-400 text-xs">
-                {selectedSubjectId ? 'No syllabus topics added yet.' : 'Select a subject to view topics.'}
+                {selectedSubjectId ? 'No syllabus topics added yet for this subject.' : 'Select a subject to view topics.'}
               </div>
             ) : (
               topics.map(topic => (
@@ -563,98 +635,11 @@ export const Targets: React.FC = () => {
         </Card>
       </div>
 
-      {/* ================= MODAL: UPLOAD SYLLABUS ================= */}
-      <Modal
-        isOpen={isSyllabusUploadModalOpen}
-        onClose={() => setIsSyllabusUploadModalOpen(false)}
-        title="Upload & Import Syllabus"
-      >
-        <div className="space-y-4">
-          {syllabusUploadSuccess && (
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{syllabusUploadSuccess}</span>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Select Course Target *
-            </label>
-            <select
-              value={syllabusImportTargetId || selectedTargetId || ''}
-              onChange={e => setSyllabusImportTargetId(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            >
-              {targets.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Quick Pre-Built Official Syllabi */}
-          <div className="p-3.5 rounded-2xl bg-brand-50/60 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800 space-y-2">
-            <span className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider block">
-              Quick 1-Click Official Curriculum:
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs font-bold justify-start"
-                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
-                onClick={() => handleLoadOfficialSyllabus('rbbit')}
-              >
-                RBB IT (Official 6 Parts)
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs font-bold justify-start"
-                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
-                onClick={() => handleLoadOfficialSyllabus('sanstha')}
-              >
-                Sangathit Sanstha (9 Parts)
-              </Button>
-            </div>
-          </div>
-
-          {/* Manual / PDF Paste Syllabus */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Or Paste Custom Syllabus Text
-            </label>
-            <textarea
-              rows={6}
-              value={syllabusText}
-              onChange={e => setSyllabusText(e.target.value)}
-              placeholder="Paste syllabus modules, chapters, or sections (e.g., 1. Computer Architecture, 2. Database Systems...)"
-              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-            <Button variant="outline" size="sm" onClick={() => setIsSyllabusUploadModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={handleProcessSyllabusImport}
-              disabled={!syllabusText.trim()}
-            >
-              Save Syllabus Topics
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* ================= MODAL: ADD / EDIT COURSE ================= */}
+      {/* ================= MODAL: ADD / EDIT COURSE WITH AUTO-SYLLABUS ================= */}
       <Modal
         isOpen={isTargetModalOpen}
         onClose={() => setIsTargetModalOpen(false)}
-        title={targetForm.id ? 'Edit Course Target' : 'Add New Course Target'}
+        title={targetForm.id ? 'Edit Course Target' : 'Add New Course & Auto-Generate Syllabus'}
       >
         <form onSubmit={handleSaveTarget} className="space-y-4">
           <div>
@@ -666,7 +651,7 @@ export const Targets: React.FC = () => {
               required
               value={targetForm.name}
               onChange={e => setTargetForm({ ...targetForm, name: e.target.value })}
-              placeholder="e.g. RBB IT Level 5, NRB, College..."
+              placeholder="e.g. Nabil Bank, RBB IT, NRB Assistant..."
               className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
@@ -702,15 +687,190 @@ export const Targets: React.FC = () => {
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+          {/* Auto-Syllabus Template Picker on New Target */}
+          {!targetForm.id && (
+            <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                ⚡ Auto-Create Syllabus Structure:
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 ${
+                  targetForm.syllabusTemplate === 'banking_commercial'
+                    ? 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 font-bold text-brand-900 dark:text-brand-100'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syllabusTemplate"
+                    checked={targetForm.syllabusTemplate === 'banking_commercial'}
+                    onChange={() => setTargetForm({ ...targetForm, syllabusTemplate: 'banking_commercial' })}
+                  />
+                  <span>Commercial Banking (6 Topics)</span>
+                </label>
+
+                <label className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 ${
+                  targetForm.syllabusTemplate === 'rbbit'
+                    ? 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 font-bold text-brand-900 dark:text-brand-100'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syllabusTemplate"
+                    checked={targetForm.syllabusTemplate === 'rbbit'}
+                    onChange={() => setTargetForm({ ...targetForm, syllabusTemplate: 'rbbit' })}
+                  />
+                  <span>RBB IT Level 5 (6 Parts)</span>
+                </label>
+
+                <label className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 ${
+                  targetForm.syllabusTemplate === 'sanstha'
+                    ? 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 font-bold text-brand-900 dark:text-brand-100'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syllabusTemplate"
+                    checked={targetForm.syllabusTemplate === 'sanstha'}
+                    onChange={() => setTargetForm({ ...targetForm, syllabusTemplate: 'sanstha' })}
+                  />
+                  <span>Sangathit Sanstha (9 Parts)</span>
+                </label>
+
+                <label className={`p-2.5 rounded-xl border text-xs cursor-pointer flex items-center gap-2 ${
+                  targetForm.syllabusTemplate === 'paste'
+                    ? 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 font-bold text-brand-900 dark:text-brand-100'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                }`}>
+                  <input
+                    type="radio"
+                    name="syllabusTemplate"
+                    checked={targetForm.syllabusTemplate === 'paste'}
+                    onChange={() => setTargetForm({ ...targetForm, syllabusTemplate: 'paste' })}
+                  />
+                  <span>Paste Custom Syllabus</span>
+                </label>
+              </div>
+
+              {targetForm.syllabusTemplate === 'paste' && (
+                <textarea
+                  rows={4}
+                  value={targetForm.customSyllabusText}
+                  onChange={e => setTargetForm({ ...targetForm, customSyllabusText: e.target.value })}
+                  placeholder="Paste syllabus chapters, sections, or topics..."
+                  className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 font-mono"
+                />
+              )}
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button variant="outline" size="sm" type="button" onClick={() => setIsTargetModalOpen(false)}>
               Cancel
             </Button>
             <Button variant="primary" size="sm" type="submit">
-              Save Course
+              Save Course & Create Syllabus
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* ================= MODAL: UPLOAD SYLLABUS ================= */}
+      <Modal
+        isOpen={isSyllabusUploadModalOpen}
+        onClose={() => setIsSyllabusUploadModalOpen(false)}
+        title="Upload & Auto-Generate Syllabus Structure"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Select Course Target *
+            </label>
+            <select
+              value={syllabusImportTargetId || selectedTargetId || ''}
+              onChange={e => setSyllabusImportTargetId(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+            >
+              {targets.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Pre-Built Official Syllabi */}
+          <div className="p-3.5 rounded-2xl bg-brand-50/60 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800 space-y-2">
+            <span className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider block">
+              1-Click Standard Curricula:
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs font-bold justify-start"
+                leftIcon={<Zap className="w-3.5 h-3.5 text-brand-600" />}
+                onClick={() => {
+                  if (selectedTargetId) autoCreateSyllabusForTarget(selectedTargetId, 'banking_commercial');
+                  setIsSyllabusUploadModalOpen(false);
+                }}
+              >
+                Commercial Banking
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs font-bold justify-start"
+                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
+                onClick={() => {
+                  if (selectedTargetId) autoCreateSyllabusForTarget(selectedTargetId, 'rbbit');
+                  setIsSyllabusUploadModalOpen(false);
+                }}
+              >
+                RBB IT (6 Parts)
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs font-bold justify-start"
+                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
+                onClick={() => {
+                  if (selectedTargetId) autoCreateSyllabusForTarget(selectedTargetId, 'sanstha');
+                  setIsSyllabusUploadModalOpen(false);
+                }}
+              >
+                Sangathit Sanstha (9 Parts)
+              </Button>
+            </div>
+          </div>
+
+          {/* Manual / PDF Paste Syllabus */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Or Paste Custom Syllabus Text
+            </label>
+            <textarea
+              rows={6}
+              value={syllabusText}
+              onChange={e => setSyllabusText(e.target.value)}
+              placeholder="Paste syllabus modules, chapters, or sections (e.g., 1. Financial Institutions in Nepal, 1.1 Commercial Banks, 2. Banking Related Law...)"
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="outline" size="sm" onClick={() => setIsSyllabusUploadModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleProcessSyllabusImport}
+              disabled={!syllabusText.trim()}
+            >
+              Extract & Save Topics
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       {/* ================= MODAL: ADD SUBJECT ================= */}
@@ -729,7 +889,7 @@ export const Targets: React.FC = () => {
               required
               value={subjectName}
               onChange={e => setSubjectName(e.target.value)}
-              placeholder="e.g. Paper II: Information Technology"
+              placeholder="e.g. Paper I: Banking and Financial Management"
               className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
@@ -774,7 +934,7 @@ export const Targets: React.FC = () => {
               required
               value={topicName}
               onChange={e => setTopicName(e.target.value)}
-              placeholder="e.g. 3. Communication & Network Technologies"
+              placeholder="e.g. 1. Financial Institutions in Nepal"
               className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
@@ -787,7 +947,7 @@ export const Targets: React.FC = () => {
               rows={2}
               value={topicDescription}
               onChange={e => setTopicDescription(e.target.value)}
-              placeholder="e.g. OSI Model, Subnetting, Routing Protocols..."
+              placeholder="e.g. Commercial Banks, Development Banks, Finance Companies..."
               className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>

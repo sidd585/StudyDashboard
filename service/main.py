@@ -242,3 +242,34 @@ async def api_email_pre_study_reminder(req: PreStudyReminderRequest):
         logger.error(f"Pre-study reminder email error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to dispatch reminder: {str(e)}")
 
+# ==================== Background 15-Min & 10:30 PM Scheduler ====================
+
+from .scheduler import (
+    start_background_scheduler,
+    register_schedule_for_reminders,
+    update_user_email_settings
+)
+import asyncio
+
+@app.on_event("startup")
+async def startup_event():
+    """Start automated background email and reminder scheduler."""
+    asyncio.create_task(start_background_scheduler())
+
+@app.post("/api/scheduler/register-session")
+def api_register_session(schedule: dict):
+    """Register a planned study session for automated 15-minute advance email alerts."""
+    register_schedule_for_reminders(schedule)
+    return {"success": True, "message": "Study session registered for 15-min reminder"}
+
+@app.post("/api/scheduler/update-user")
+def api_update_user_email(payload: dict):
+    """Update user email for 10:30 PM Nepal daily summaries."""
+    update_user_email_settings(
+        user_id=payload.get("userId", ""),
+        email=payload.get("email", ""),
+        name=payload.get("name", "")
+    )
+    return {"success": True, "message": "User email updated for scheduled reports"}
+
+

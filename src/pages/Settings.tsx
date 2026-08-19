@@ -320,15 +320,26 @@ export const SettingsContent: React.FC = () => {
           )}
 
           <div className="space-y-4">
+            {/* Sender Address Info Banner */}
+            <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+              <div className="font-bold flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-blue-600" />
+                <span>Email Sender Configuration:</span>
+              </div>
+              <p className="text-[11px] text-blue-700 dark:text-blue-300">
+                Emails are securely dispatched via Resend from: <code className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 font-mono font-bold">StudyDashboard &lt;study@resend.dev&gt;</code> (or your custom domain set in <code className="font-mono">RESEND_FROM_EMAIL</code>).
+              </p>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Recipient Email Address
+                Recipient Email Address (Where you receive your alerts)
               </label>
               <input
                 type="email"
                 value={recipientEmail}
                 onChange={e => setRecipientEmail(e.target.value)}
-                className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
               />
             </div>
 
@@ -350,7 +361,7 @@ export const SettingsContent: React.FC = () => {
                   onChange={e => setIsDaily10pm(e.target.checked)}
                   className="rounded text-brand-600 focus:ring-brand-500"
                 />
-                <span>Enable 10:00 PM Asia/Kathmandu Daily Summary Email (with 7-day focus chart)</span>
+                <span>Enable 10:30 PM Asia/Kathmandu Daily Summary Email (with 7-day focus chart)</span>
               </label>
             </div>
 
@@ -359,7 +370,7 @@ export const SettingsContent: React.FC = () => {
                 Save Email Preferences
               </Button>
               <Button variant="outline" size="sm" leftIcon={<Mail className="w-3.5 h-3.5" />} onClick={handleTest10pmSummary}>
-                Send Test 10 PM Summary
+                Send Test 10:30 PM Summary
               </Button>
             </div>
           </div>
