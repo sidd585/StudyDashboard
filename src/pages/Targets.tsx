@@ -7,20 +7,17 @@ import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
-import { Input, Select } from '../components/common/Input';
 import {
   Target as TargetIcon,
   Plus,
   Edit2,
   Trash2,
-  Archive,
-  ChevronRight,
   BookOpen,
   Tag,
-  Sparkles,
-  Calendar,
+  Upload,
+  FileText,
+  CheckCircle2,
   Layers,
-  FolderPlus,
 } from 'lucide-react';
 import type { Target, Subject, Topic, TargetType } from '../types';
 
@@ -39,7 +36,8 @@ export const Targets: React.FC = () => {
   const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
-  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isSyllabusUploadModalOpen, setIsSyllabusUploadModalOpen] = useState(false);
+  const [syllabusUploadSuccess, setSyllabusUploadSuccess] = useState<string | null>(null);
 
   // Target Form
   const [targetForm, setTargetForm] = useState<{
@@ -68,6 +66,10 @@ export const Targets: React.FC = () => {
   const [subjectDescription, setSubjectDescription] = useState('');
   const [topicName, setTopicName] = useState('');
   const [topicDescription, setTopicDescription] = useState('');
+
+  // Syllabus Import Form State
+  const [syllabusText, setSyllabusText] = useState('');
+  const [syllabusImportTargetId, setSyllabusImportTargetId] = useState('');
 
   // Default target selection
   React.useEffect(() => {
@@ -195,74 +197,187 @@ export const Targets: React.FC = () => {
     setIsTopicModalOpen(false);
   };
 
-  // Import Nepal Template
-  const handleImportTemplate = async (templateKey: string) => {
-    const tmpl = NEPAL_EXAM_TEMPLATES[templateKey];
-    if (!tmpl) return;
+  // Parse and Save Syllabus
+  const handleProcessSyllabusImport = async () => {
+    const targetIdToUse = syllabusImportTargetId || selectedTargetId;
+    if (!targetIdToUse || !syllabusText.trim()) {
+      alert('Please select a course and provide syllabus text.');
+      return;
+    }
 
-    const targetId = `target-${templateKey}-${Date.now()}`;
-    await db.targets.put({
-      id: targetId,
+    const lines = syllabusText.split('\n').map(l => l.trim()).filter(Boolean);
+    const mainSectionRegex = /^(?:(?:Section|Part|Paper|Unit|Chapter|\d+)[\s\.\:\-\)]+|[0-9]+\.\s+)/i;
+
+    const now = Date.now();
+    const subId = `sub-syllabus-${now}`;
+    
+    // Create main Subject wrapper
+    await db.subjects.put({
+      id: subId,
       userId: currentUser.id,
-      name: tmpl.name,
-      type: tmpl.type,
-      color: tmpl.color,
-      icon: tmpl.icon,
-      dailyGoalMinutes: tmpl.dailyGoalMinutes,
-      weeklyGoalMinutes: tmpl.weeklyGoalMinutes,
-      targetQuestionGoal: tmpl.targetQuestionGoal,
-      isArchived: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      targetId: targetIdToUse,
+      name: 'Imported Syllabus Curriculum',
+      description: 'Extracted from uploaded syllabus document',
+      createdAt: now,
+      updatedAt: now,
     });
 
-    for (const sub of tmpl.subjects) {
-      const subId = `sub-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    // Detect and insert topics
+    let count = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.length < 4) continue;
+
+      if (mainSectionRegex.test(line) || /^[0-9]+[\.\)]\s+/.test(line)) {
+        await db.topics.put({
+          id: `top-syl-${now}-${count}`,
+          userId: currentUser.id,
+          targetId: targetIdToUse,
+          subjectId: subId,
+          name: line.replace(/^[0-9]+[\.\)]\s+/, '').trim(),
+          description: lines[i + 1] && !mainSectionRegex.test(lines[i + 1]) ? lines[i + 1] : undefined,
+          createdAt: now,
+          updatedAt: now,
+        });
+        count++;
+      }
+    }
+
+    // If no numbered lines, split into chunk topics
+    if (count === 0) {
+      const chunks = lines.slice(0, 10);
+      for (let i = 0; i < chunks.length; i++) {
+        await db.topics.put({
+          id: `top-syl-${now}-${i}`,
+          userId: currentUser.id,
+          targetId: targetIdToUse,
+          subjectId: subId,
+          name: chunks[i],
+          createdAt: now,
+          updatedAt: now,
+        });
+        count++;
+      }
+    }
+
+    setSelectedTargetId(targetIdToUse);
+    setSelectedSubjectId(subId);
+    setSyllabusUploadSuccess(`Successfully extracted and saved ${count} topics to syllabus!`);
+    setTimeout(() => {
+      setSyllabusUploadSuccess(null);
+      setIsSyllabusUploadModalOpen(false);
+      setSyllabusText('');
+    }, 2000);
+  };
+
+  // 1-Click Load Official Templates
+  const handleLoadOfficialSyllabus = async (templateType: 'rbbit' | 'sanstha' | 'nrb') => {
+    const targetIdToUse = syllabusImportTargetId || selectedTargetId;
+    if (!targetIdToUse) {
+      alert('Please select a course target first.');
+      return;
+    }
+
+    const now = Date.now();
+    const subId = `sub-official-${now}`;
+
+    if (templateType === 'rbbit') {
       await db.subjects.put({
         id: subId,
         userId: currentUser.id,
-        targetId,
-        name: sub.name,
-        description: sub.description,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        targetId: targetIdToUse,
+        name: 'Paper II: IT & Management (Official)',
+        description: 'RBB IT Assistant Level 5 Official 6-Part Curriculum',
+        createdAt: now,
+        updatedAt: now,
       });
 
-      for (const top of sub.topics) {
+      const rbb6Parts = [
+        '1. Introduction of Computer (Types, Internet/Email, Physical Security, AI/ML)',
+        '2. Computer Architecture (Registers, Hard Disk, CPU, I/O Management)',
+        '3. Communication and Computer Network Technologies (Networking Devices, Switching, IPv4/IPv6, Security)',
+        '4. Operating System and Information Systems (Process Scheduling, DOS/UNIX/Windows, OS Security)',
+        '5. Database Management System & Web Technology (Normalization, Indexing, Data Warehouse, HTML/CSS)',
+        '6. Cybersecurity and IT Policies (Access Control, Malware, ICT Policy 2072, NRB Guidelines)',
+      ];
+
+      for (let i = 0; i < rbb6Parts.length; i++) {
         await db.topics.put({
-          id: `top-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: `top-rbb-${now}-${i}`,
           userId: currentUser.id,
-          targetId,
+          targetId: targetIdToUse,
           subjectId: subId,
-          name: top,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          name: rbb6Parts[i],
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (templateType === 'sanstha') {
+      await db.subjects.put({
+        id: subId,
+        userId: currentUser.id,
+        targetId: targetIdToUse,
+        name: 'Pre-Qualifying Curriculum (Official)',
+        description: 'Lok Sewa Aayog Unified 9-Part Curriculum',
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      const sanstha9Parts = [
+        '1. Geography, Environment & Population',
+        '2. History and Culture of Nepal',
+        '3. Economic Aspects and Development',
+        '4. Governance and Constitution of Nepal',
+        '5. International Affairs & Organizations (UN, SAARC, BIMSTEC)',
+        '6. Science, Public Health & Current Affairs',
+        '7. Office & Public Management (Tippani, Filing, Public Charter)',
+        '8. Applied Mathematics (Percentages, Ratios, Profit & Loss, Interest)',
+        '9. Knowledge about Public Enterprises & Financial Regulatory Authorities',
+      ];
+
+      for (let i = 0; i < sanstha9Parts.length; i++) {
+        await db.topics.put({
+          id: `top-san-${now}-${i}`,
+          userId: currentUser.id,
+          targetId: targetIdToUse,
+          subjectId: subId,
+          name: sanstha9Parts[i],
+          createdAt: now,
+          updatedAt: now,
         });
       }
     }
 
-    setIsTemplateModalOpen(false);
-    setSelectedTargetId(targetId);
+    setSelectedTargetId(targetIdToUse);
+    setSelectedSubjectId(subId);
+    setSyllabusUploadSuccess('Official syllabus loaded successfully!');
+    setTimeout(() => {
+      setSyllabusUploadSuccess(null);
+      setIsSyllabusUploadModalOpen(false);
+    }, 1500);
   };
 
   return (
-    <div className="space-y-6 pb-12 animate-fade-in">
+    <div className="space-y-6 pb-16 animate-fade-in max-w-6xl mx-auto">
       {/* Top Header Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">My Targets & Syllabi</h2>
-          <p className="text-xs text-slate-400">Manage your study targets, subjects, and topics.</p>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Courses & Syllabus</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Manage your courses, official syllabi, and multi-part topic structures.
+          </p>
         </div>
 
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            leftIcon={<Sparkles className="w-4 h-4 text-amber-400" />}
-            onClick={() => setIsTemplateModalOpen(true)}
+            leftIcon={<Upload className="w-4 h-4 text-blue-500" />}
+            onClick={() => setIsSyllabusUploadModalOpen(true)}
           >
-            Nepal Exam Templates
+            Upload Syllabus
           </Button>
+
           <Button
             variant="primary"
             size="sm"
@@ -281,19 +396,19 @@ export const Targets: React.FC = () => {
               setIsTargetModalOpen(true);
             }}
           >
-            Add Target
+            Add Course
           </Button>
         </div>
       </div>
 
       {/* 3-Column Hierarchy Explorer (Target -> Subject -> Topic) */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* 1. Targets Column */}
-        <Card className="p-4 border-slate-800 flex flex-col h-[600px]">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <TargetIcon className="w-4 h-4 text-brand-400" />
-              <span>Targets ({targets.length})</span>
+        {/* 1. Targets / Courses Column */}
+        <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col h-[560px] shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <TargetIcon className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>Courses ({targets.length})</span>
             </span>
             <button
               onClick={() => {
@@ -309,7 +424,7 @@ export const Targets: React.FC = () => {
                 });
                 setIsTargetModalOpen(true);
               }}
-              className="text-xs text-brand-400 hover:text-brand-300 font-semibold"
+              className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-bold"
             >
               + Add
             </button>
@@ -324,15 +439,15 @@ export const Targets: React.FC = () => {
                   onClick={() => setSelectedTargetId(target.id)}
                   className={`p-3 rounded-xl border cursor-pointer transition-all ${
                     isSelected
-                      ? 'bg-brand-600/10 border-brand-500/50 text-white shadow-sm'
-                      : 'bg-slate-900/40 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                      ? 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 text-brand-900 dark:text-brand-100 ring-1 ring-brand-500 shadow-xs'
+                      : 'bg-slate-50/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
                   }`}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-2.5 truncate">
                       <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: target.color }} />
                       <div className="truncate">
-                        <p className="font-bold text-sm truncate">{target.name}</p>
+                        <p className="font-bold text-xs sm:text-sm truncate">{target.name}</p>
                         <p className="text-[11px] text-slate-400">{target.type} • {target.dailyGoalMinutes}m/day</p>
                       </div>
                     </div>
@@ -342,7 +457,7 @@ export const Targets: React.FC = () => {
                           e.stopPropagation();
                           handleEditTarget(target);
                         }}
-                        className="p-1 text-slate-500 hover:text-slate-300 rounded"
+                        className="p-1 text-slate-400 hover:text-slate-600 rounded"
                       >
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
@@ -351,7 +466,7 @@ export const Targets: React.FC = () => {
                           e.stopPropagation();
                           handleDeleteTarget(target.id);
                         }}
-                        className="p-1 text-slate-500 hover:text-rose-400 rounded"
+                        className="p-1 text-slate-400 hover:text-rose-500 rounded"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -363,17 +478,17 @@ export const Targets: React.FC = () => {
           </div>
         </Card>
 
-        {/* 2. Subjects Column */}
-        <Card className="p-4 border-slate-800 flex flex-col h-[600px]">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-sky-400" />
-              <span>Subjects ({subjects.length})</span>
+        {/* 2. Subjects / Papers Column */}
+        <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col h-[560px] shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-sky-500" />
+              <span>Subjects / Papers ({subjects.length})</span>
             </span>
             {selectedTargetId && (
               <button
                 onClick={() => setIsSubjectModalOpen(true)}
-                className="text-xs text-brand-400 hover:text-brand-300 font-semibold"
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-bold"
               >
                 + Add
               </button>
@@ -382,8 +497,8 @@ export const Targets: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto space-y-2 py-3">
             {subjects.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs">
-                {selectedTargetId ? 'No subjects added yet. Click + Add to create one.' : 'Select a target first.'}
+              <div className="text-center py-12 text-slate-400 text-xs">
+                {selectedTargetId ? 'No subjects added. Click "+ Add" or "Upload Syllabus".' : 'Select a course first.'}
               </div>
             ) : (
               subjects.map(subject => {
@@ -394,13 +509,13 @@ export const Targets: React.FC = () => {
                     onClick={() => setSelectedSubjectId(subject.id)}
                     className={`p-3 rounded-xl border cursor-pointer transition-all ${
                       isSelected
-                        ? 'bg-blue-600/10 border-blue-500/50 text-white shadow-sm'
-                        : 'bg-slate-900/40 border-slate-800/80 text-slate-300 hover:border-slate-700'
+                        ? 'bg-sky-50 dark:bg-sky-950/40 border-sky-500 text-sky-900 dark:text-sky-100 ring-1 ring-sky-500 shadow-xs'
+                        : 'bg-slate-50/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-slate-300'
                     }`}
                   >
-                    <p className="font-semibold text-sm">{subject.name}</p>
+                    <p className="font-bold text-xs sm:text-sm">{subject.name}</p>
                     {subject.description && (
-                      <p className="text-[11px] text-slate-400 mt-1 line-clamp-2">{subject.description}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{subject.description}</p>
                     )}
                   </div>
                 );
@@ -409,17 +524,17 @@ export const Targets: React.FC = () => {
           </div>
         </Card>
 
-        {/* 3. Topics Column */}
-        <Card className="p-4 border-slate-800 flex flex-col h-[600px]">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <span className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-              <Tag className="w-4 h-4 text-sky-400" />
-              <span>Topics ({topics.length})</span>
+        {/* 3. Topics / Parts Column */}
+        <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col h-[560px] shadow-xs">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider flex items-center gap-2">
+              <Tag className="w-4 h-4 text-indigo-500" />
+              <span>Syllabus Topics ({topics.length})</span>
             </span>
             {selectedSubjectId && (
               <button
                 onClick={() => setIsTopicModalOpen(true)}
-                className="text-xs text-brand-400 hover:text-brand-300 font-semibold"
+                className="text-xs text-brand-600 dark:text-brand-400 hover:underline font-bold"
               >
                 + Add
               </button>
@@ -428,18 +543,18 @@ export const Targets: React.FC = () => {
 
           <div className="flex-1 overflow-y-auto space-y-2 py-3">
             {topics.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-xs">
-                {selectedSubjectId ? 'No topics yet. Click + Add to add syllabus topics.' : 'Select a subject first.'}
+              <div className="text-center py-12 text-slate-400 text-xs">
+                {selectedSubjectId ? 'No syllabus topics added yet.' : 'Select a subject to view topics.'}
               </div>
             ) : (
               topics.map(topic => (
                 <div
                   key={topic.id}
-                  className="p-3 rounded-xl border border-slate-800 bg-slate-900/40 text-slate-200"
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 text-slate-800 dark:text-slate-200 space-y-0.5"
                 >
-                  <p className="font-medium text-xs text-slate-100">{topic.name}</p>
+                  <p className="font-semibold text-xs text-slate-900 dark:text-white">{topic.name}</p>
                   {topic.description && (
-                    <p className="text-[10px] text-slate-400 mt-0.5">{topic.description}</p>
+                    <p className="text-[10px] text-slate-400">{topic.description}</p>
                   )}
                 </div>
               ))
@@ -448,203 +563,240 @@ export const Targets: React.FC = () => {
         </Card>
       </div>
 
-      {/* Target Modal */}
+      {/* ================= MODAL: UPLOAD SYLLABUS ================= */}
+      <Modal
+        isOpen={isSyllabusUploadModalOpen}
+        onClose={() => setIsSyllabusUploadModalOpen(false)}
+        title="Upload & Import Syllabus"
+      >
+        <div className="space-y-4">
+          {syllabusUploadSuccess && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{syllabusUploadSuccess}</span>
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Select Course Target *
+            </label>
+            <select
+              value={syllabusImportTargetId || selectedTargetId || ''}
+              onChange={e => setSyllabusImportTargetId(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+            >
+              {targets.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Pre-Built Official Syllabi */}
+          <div className="p-3.5 rounded-2xl bg-brand-50/60 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800 space-y-2">
+            <span className="text-xs font-bold text-brand-900 dark:text-brand-200 uppercase tracking-wider block">
+              Quick 1-Click Official Curriculum:
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs font-bold justify-start"
+                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
+                onClick={() => handleLoadOfficialSyllabus('rbbit')}
+              >
+                RBB IT (Official 6 Parts)
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs font-bold justify-start"
+                leftIcon={<Layers className="w-3.5 h-3.5 text-brand-600" />}
+                onClick={() => handleLoadOfficialSyllabus('sanstha')}
+              >
+                Sangathit Sanstha (9 Parts)
+              </Button>
+            </div>
+          </div>
+
+          {/* Manual / PDF Paste Syllabus */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Or Paste Custom Syllabus Text
+            </label>
+            <textarea
+              rows={6}
+              value={syllabusText}
+              onChange={e => setSyllabusText(e.target.value)}
+              placeholder="Paste syllabus modules, chapters, or sections (e.g., 1. Computer Architecture, 2. Database Systems...)"
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="outline" size="sm" onClick={() => setIsSyllabusUploadModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleProcessSyllabusImport}
+              disabled={!syllabusText.trim()}
+            >
+              Save Syllabus Topics
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* ================= MODAL: ADD / EDIT COURSE ================= */}
       <Modal
         isOpen={isTargetModalOpen}
         onClose={() => setIsTargetModalOpen(false)}
-        title={targetForm.id ? 'Edit Study Target' : 'Create Study Target'}
+        title={targetForm.id ? 'Edit Course Target' : 'Add New Course Target'}
       >
         <form onSubmit={handleSaveTarget} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Target Name</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Course / Exam Name *
+            </label>
             <input
               type="text"
               required
               value={targetForm.name}
               onChange={e => setTargetForm({ ...targetForm, name: e.target.value })}
-              placeholder="e.g. RBB IT, NRB Assistant, AI Course, College"
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="e.g. RBB IT Level 5, NRB, College..."
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Category</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Category
+              </label>
               <select
                 value={targetForm.type}
-                onChange={e => setTargetForm({ ...targetForm, type: e.target.value as TargetType })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none"
+                onChange={e => setTargetForm({ ...targetForm, type: e.target.value as any })}
+                className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
               >
                 <option value="Competitive Exam">Competitive Exam</option>
                 <option value="College">College</option>
                 <option value="Course">Course</option>
-                <option value="Certification">Certification</option>
-                <option value="Custom">Custom</option>
               </select>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Color Theme</label>
-              <div className="flex items-center gap-2 pt-1">
-                {['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#3b82f6', '#8b5cf6'].map(col => (
-                  <button
-                    key={col}
-                    type="button"
-                    onClick={() => setTargetForm({ ...targetForm, color: col })}
-                    className={`w-6 h-6 rounded-full border-2 transition-all ${
-                      targetForm.color === col ? 'border-white scale-110' : 'border-transparent'
-                    }`}
-                    style={{ backgroundColor: col }}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Daily Goal (Minutes)</label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Daily Goal (Minutes)
+              </label>
               <input
                 type="number"
-                min="15"
-                step="15"
+                min={15}
+                max={480}
                 value={targetForm.dailyGoalMinutes}
                 onChange={e => setTargetForm({ ...targetForm, dailyGoalMinutes: Number(e.target.value) })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Exam Date (Optional)</label>
-              <input
-                type="date"
-                value={targetForm.deadlineDate}
-                onChange={e => setTargetForm({ ...targetForm, deadlineDate: e.target.value })}
-                className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white"
+                className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
               />
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 pt-4">
-            <Button variant="outline" type="button" onClick={() => setIsTargetModalOpen(false)}>
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="outline" size="sm" type="button" onClick={() => setIsTargetModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit">
-              Save Target
+            <Button variant="primary" size="sm" type="submit">
+              Save Course
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* Nepal Template Quick Import Modal */}
-      <Modal
-        isOpen={isTemplateModalOpen}
-        onClose={() => setIsTemplateModalOpen(false)}
-        title="Import Nepal Exam Track"
-        size="lg"
-      >
-        <div className="space-y-4">
-          <p className="text-xs text-slate-400">
-            Select a standard Nepal examination template. It will create the target with all official subjects and syllabus topics.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {Object.entries(NEPAL_EXAM_TEMPLATES).map(([key, tmpl]) => (
-              <div
-                key={key}
-                onClick={() => handleImportTemplate(key)}
-                className="p-4 rounded-xl border border-slate-800 bg-slate-900/60 hover:border-brand-500 hover:bg-brand-500/10 cursor-pointer transition-all flex flex-col justify-between"
-              >
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: tmpl.color }} />
-                    <h4 className="font-bold text-sm text-white">{tmpl.name}</h4>
-                  </div>
-                  <p className="text-xs text-slate-400 mb-3">{tmpl.subjects.length} Subjects • {tmpl.dailyGoalMinutes}m daily target</p>
-                  <div className="flex flex-wrap gap-1">
-                    {tmpl.subjects.slice(0, 3).map(s => (
-                      <span key={s.name} className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
-                        {s.name}
-                      </span>
-                    ))}
-                    {tmpl.subjects.length > 3 && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                        +{tmpl.subjects.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-3 mt-3 border-t border-slate-800/80 flex justify-end">
-                  <span className="text-xs font-semibold text-brand-400">+ Import Track</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Modal>
-
-      {/* Subject Modal */}
+      {/* ================= MODAL: ADD SUBJECT ================= */}
       <Modal
         isOpen={isSubjectModalOpen}
         onClose={() => setIsSubjectModalOpen(false)}
-        title={`Add Subject to ${activeTarget?.name || 'Target'}`}
+        title="Add Subject / Paper"
       >
         <form onSubmit={handleSaveSubject} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Subject Name</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Subject / Paper Name *
+            </label>
             <input
               type="text"
               required
               value={subjectName}
               onChange={e => setSubjectName(e.target.value)}
-              placeholder="e.g. Computer Networks, Banking Laws"
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white"
+              placeholder="e.g. Paper II: Information Technology"
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Description (Optional)</label>
-            <textarea
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Description (Optional)
+            </label>
+            <input
+              type="text"
               value={subjectDescription}
               onChange={e => setSubjectDescription(e.target.value)}
-              placeholder="Brief overview of topics covered..."
-              rows={3}
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white"
+              placeholder="Brief summary of modules covered..."
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" type="button" onClick={() => setIsSubjectModalOpen(false)}>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="outline" size="sm" type="button" onClick={() => setIsSubjectModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit">
+            <Button variant="primary" size="sm" type="submit">
               Save Subject
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* Topic Modal */}
+      {/* ================= MODAL: ADD TOPIC ================= */}
       <Modal
         isOpen={isTopicModalOpen}
         onClose={() => setIsTopicModalOpen(false)}
-        title={`Add Topic to ${activeSubject?.name || 'Subject'}`}
+        title="Add Syllabus Topic"
       >
         <form onSubmit={handleSaveTopic} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Topic Name</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Topic Name *
+            </label>
             <input
               type="text"
               required
               value={topicName}
               onChange={e => setTopicName(e.target.value)}
-              placeholder="e.g. Switching Technology, BAFIA Section 15"
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white"
+              placeholder="e.g. 3. Communication & Network Technologies"
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
             />
           </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" type="button" onClick={() => setIsTopicModalOpen(false)}>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+              Subtopics / Key Concepts (Optional)
+            </label>
+            <textarea
+              rows={2}
+              value={topicDescription}
+              onChange={e => setTopicDescription(e.target.value)}
+              placeholder="e.g. OSI Model, Subnetting, Routing Protocols..."
+              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="outline" size="sm" type="button" onClick={() => setIsTopicModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" type="submit">
+            <Button variant="primary" size="sm" type="submit">
               Save Topic
             </Button>
           </div>
