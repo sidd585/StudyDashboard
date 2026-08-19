@@ -60,6 +60,7 @@ export const Questions: React.FC = () => {
   const [extractedReviewList, setExtractedReviewList] = useState<ParsedMCQCandidate[]>([]);
   const [diagnostics, setDiagnostics] = useState<ImportDiagnostics | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [extractingStage, setExtractingStage] = useState<string>('Reading PDF...');
   const [rawPastedText, setRawPastedText] = useState('');
 
   const subjects = useLiveQuery(
@@ -173,12 +174,19 @@ export const Questions: React.FC = () => {
     }
 
     setIsExtracting(true);
+    setExtractingStage('Reading file...');
     try {
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+      const isPdfOrImage = file.type === 'application/pdf' || 
+                           file.name.toLowerCase().endsWith('.pdf') ||
+                           file.type.startsWith('image/') ||
+                           /\.(png|jpe?g)$/i.test(file.name);
+
+      if (isPdfOrImage) {
         const result = await importMCQsFromPDF(file, {
           defaultTargetId: targetId,
           defaultSubjectId: selectedSubjectId || undefined,
           sourceFileName: file.name,
+          onProgress: (stage) => setExtractingStage(stage),
         });
 
         if (result.questions.length > 0) {
@@ -187,7 +195,7 @@ export const Questions: React.FC = () => {
           setIsUploadModalOpen(false);
           setIsReviewModalOpen(true);
         } else {
-          alert('Could not extract valid questions from this PDF.');
+          alert('Could not extract valid questions from this document.');
         }
       } else {
         const rawText = await file.text();
@@ -208,7 +216,7 @@ export const Questions: React.FC = () => {
       }
     } catch (err: any) {
       console.error('File extraction error:', err);
-      alert('Error parsing PDF file. Please ensure it is a readable document.');
+      alert(`Error parsing file: ${err?.message || 'Please ensure it is a valid PDF or image document.'}`);
     } finally {
       setIsExtracting(false);
     }
@@ -662,15 +670,20 @@ export const Questions: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Upload File (PDF / Text)</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Upload File (PDF / PNG / JPG / Text)</label>
             <input
               type="file"
-              accept=".pdf,.txt,.json,.csv"
+              accept=".pdf,.png,.jpg,.jpeg,.txt,.json,.csv"
               onChange={handleFileUpload}
               disabled={!selectedTargetId || isExtracting}
               className="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-brand-600 file:text-white hover:file:bg-brand-500 cursor-pointer"
             />
-            {isExtracting && <p className="text-xs text-amber-500 font-medium mt-1">Extracting pages and deterministic MCQ structures...</p>}
+            {isExtracting && (
+              <div className="flex items-center gap-1.5 text-xs text-brand-600 dark:text-brand-400 font-medium mt-2">
+                <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                <span>{extractingStage}</span>
+              </div>
+            )}
           </div>
 
           <div className="pt-2">
