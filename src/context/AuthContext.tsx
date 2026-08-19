@@ -41,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(data as Profile);
       } else {
         const cleanEmail = userEmail.toLowerCase();
-        const role: ApplicationRole = cleanEmail.includes('sid') || cleanEmail.includes('siddhartha') ? 'MAIN_ADMIN' : 'USER';
+        const role: ApplicationRole = cleanEmail === 'sid.paudel585@gmail.com' ? 'MAIN_ADMIN' : 'USER';
         const avatar = cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png';
         const displayName = cleanEmail.split('@')[0];
 
@@ -152,7 +152,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (data.user) {
         // Direct profile initialization
-        const role = cleanEmail.includes('sid') || cleanEmail.includes('siddhartha') ? 'MAIN_ADMIN' : 'USER';
+        const role = cleanEmail === 'sid.paudel585@gmail.com' ? 'MAIN_ADMIN' : 'USER';
         const avatar = cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png';
 
         try {

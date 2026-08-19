@@ -75,6 +75,16 @@ export const adminService = {
     return !error;
   },
 
+  // Update a user's role (MAIN_ADMIN, SUB_ADMIN, USER)
+  async updateUserRole(userId: string, newRole: ApplicationRole): Promise<boolean> {
+    const { error } = await supabase
+      .from('profiles')
+      .update({ role: newRole, updated_at: new Date().toISOString() })
+      .eq('id', userId);
+
+    return !error;
+  },
+
   // Send an invitation
   async inviteUser(email: string, role: ApplicationRole = 'USER', managedBy?: string | null): Promise<{ success: boolean; error?: string }> {
     const { data: { user } } = await supabase.auth.getUser();
