@@ -337,6 +337,20 @@ export const courseService = {
       }
     }
 
+    if (syllabusFileName) {
+      try {
+        await supabase.from('syllabus_documents').insert({
+          user_id: user.id,
+          course_id: courseId,
+          subject_id: subjectId || null,
+          document_name: syllabusFileName,
+          raw_text: sections.map(s => `${s.name}: ${s.lessons.map(l => l.name).join(', ')}`).join('\n'),
+        });
+      } catch (docErr) {
+        console.warn('Syllabus document metadata note:', docErr);
+      }
+    }
+
     return { topicsCreated, lessonsCreated };
   }
 };

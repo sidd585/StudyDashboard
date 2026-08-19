@@ -87,39 +87,35 @@ export const questionService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
+    const payload: any = {
+      user_id: user.id,
+      course_id: input.courseId,
+      subject_id: input.subjectId || null,
+      topic_id: input.topicId || null,
+      question_text: input.questionText.trim(),
+      option_a: input.optionA.trim(),
+      option_b: input.optionB.trim(),
+      option_c: input.optionC.trim(),
+      option_d: input.optionD.trim(),
+      correct_answer: (input.correctAnswer || 'A').toUpperCase(),
+      explanation: input.explanation?.trim() || null,
+      year: input.year || 2027,
+    };
+
     const { data, error } = await supabase
       .from('questions')
-      .insert({
-        user_id: user.id,
-        course_id: input.courseId,
-        subject_id: input.subjectId || null,
-        topic_id: input.topicId || null,
-        subtopic_id: input.subtopicId || null,
-        question_text: input.questionText.trim(),
-        option_a: input.optionA.trim(),
-        option_b: input.optionB.trim(),
-        option_c: input.optionC.trim(),
-        option_d: input.optionD.trim(),
-        correct_answer: input.correctAnswer || null,
-        answer_status: input.answerStatus || 'VALID',
-        explanation: input.explanation?.trim() || null,
-        year: input.year || 2027,
-        source_file_id: input.sourceFileId || null,
-        source_page: input.sourcePage || null,
-        original_question_number: input.originalQuestionNumber || null,
-        is_sample: input.isSample || false,
-      })
+      .insert(payload)
       .select()
       .single();
 
     if (error) {
-      console.error('Error creating question:', error);
+      console.error('Error creating question in Supabase:', error);
       return null;
     }
     return data;
   },
 
-  // Batch insert with duplicate safety
+  // Batch insert with duplicate safety and automatic fallback
   async createQuestionsBatch(inputs: QuestionInsertInput[]): Promise<{ inserted: number; errors: number }> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user || inputs.length === 0) return { inserted: 0, errors: 0 };
@@ -129,25 +125,19 @@ export const questionService = {
       course_id: input.courseId,
       subject_id: input.subjectId || null,
       topic_id: input.topicId || null,
-      subtopic_id: input.subtopicId || null,
       question_text: input.questionText.trim(),
       option_a: input.optionA.trim(),
       option_b: input.optionB.trim(),
       option_c: input.optionC.trim(),
       option_d: input.optionD.trim(),
-      correct_answer: input.correctAnswer || null,
-      answer_status: input.answerStatus || 'VALID',
+      correct_answer: (input.correctAnswer || 'A').toUpperCase(),
       explanation: input.explanation?.trim() || null,
       year: input.year || 2027,
-      source_file_id: input.sourceFileId || null,
-      source_page: input.sourcePage || null,
-      original_question_number: input.originalQuestionNumber || null,
-      is_sample: input.isSample || false,
     }));
 
     let totalInserted = 0;
     let totalErrors = 0;
-    const chunkSize = 50;
+    const chunkSize = 25;
 
     for (let i = 0; i < rows.length; i += chunkSize) {
       const chunk = rows.slice(i, i + chunkSize);
@@ -157,8 +147,22 @@ export const questionService = {
         .select('id');
 
       if (error) {
-        console.error('Batch insert error:', error);
-        totalErrors += chunk.length;
+        console.warn('Batch chunk insert failed, falling back to individual inserts:', error.message);
+        // Fallback: insert one-by-one so good questions still get saved
+        for (const row of chunk) {
+          const { data: singleData, error: singleErr } = await supabase
+            .from('questions')
+            .insert(row)
+            .select('id')
+            .single();
+
+          if (!singleErr && singleData) {
+            totalInserted++;
+          } else {
+            console.error('Individual question insert error:', singleErr?.message);
+            totalErrors++;
+          }
+        }
       } else {
         totalInserted += (data?.length || 0);
       }

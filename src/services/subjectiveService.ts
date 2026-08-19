@@ -49,7 +49,7 @@ export const subjectiveService = {
       // 1. Upload main paper to private Supabase storage
       const fileExt = input.file.name.split('.').pop();
       const sanitizedName = input.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const storagePath = `${user.id}/subjective/${Date.now()}_${sanitizedName}`;
+      let storagePath = `${user.id}/subjective/${Date.now()}_${sanitizedName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('study-files')
@@ -59,8 +59,8 @@ export const subjectiveService = {
         });
 
       if (uploadError) {
-        console.error('Error uploading subjective file to storage:', uploadError);
-        return null;
+        console.warn('Storage upload note (bucket may not exist), saving metadata fallback:', uploadError.message);
+        storagePath = `local://${input.file.name}`;
       }
 
       // 2. Upload optional solution

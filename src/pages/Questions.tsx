@@ -337,30 +337,37 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       }));
 
       // Directly batch save valid questions to Supabase
+      let batchResult = { inserted: 0, errors: 0 };
       if (inputs.length > 0) {
-        await questionService.createQuestionsBatch(inputs);
+        batchResult = await questionService.createQuestionsBatch(inputs);
       }
 
       setIsUploadMcqModalOpen(false);
 
-      if (validCandidates.length > 0 && uncertainCandidates.length === 0) {
+      if (uploadCourseId !== selectedCourseId) {
+        setSelectedCourseId(uploadCourseId);
+      }
+      if (uploadSubjectId) {
+        setSelectedSubjectId(uploadSubjectId);
+      }
+
+      if (batchResult.inserted > 0) {
         setUploadSuccessMessage(
-          `✓ ${validCandidates.length} questions uploaded successfully — ready for practice!`
+          `✓ ${batchResult.inserted} questions saved to Supabase Question Bank — ready for practice!`
         );
         setTimeout(() => setUploadSuccessMessage(null), 6000);
-      } else if (uncertainCandidates.length > 0) {
+      } else if (validCandidates.length > 0 && batchResult.errors > 0) {
+        alert('Could not save questions to Supabase. Please ensure your database table permissions are open.');
+      }
+
+      if (uncertainCandidates.length > 0) {
         setUncertainReviewQuestions(uncertainCandidates);
         setIsUncertainModalOpen(true);
-        if (validCandidates.length > 0) {
-          setUploadSuccessMessage(
-            `✓ ${validCandidates.length} questions saved directly. ${uncertainCandidates.length} question(s) need quick review.`
-          );
-        }
-      } else {
+      } else if (validCandidates.length === 0) {
         alert('No valid MCQs could be detected in this document. Please check the file format.');
       }
 
-      loadMcqs();
+      await loadMcqs();
     } catch (err: any) {
       console.error('Error importing MCQs:', err);
       alert(`Failed to parse file: ${err.message || 'Error processing document'}`);
