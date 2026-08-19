@@ -40,24 +40,47 @@ export const courseService = {
   // Create a new course
   async createCourse(input: CourseInput): Promise<CloudCourse | null> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return null;
+    if (!user) {
+      console.error('No authenticated user found for createCourse');
+      return null;
+    }
+
+    const payload: any = {
+      user_id: user.id,
+      name: input.name.trim(),
+      daily_goal_minutes: input.dailyGoalMinutes || 60,
+      color: input.color || '#5b5bd6',
+      is_archived: false,
+    };
+
+    if (input.description) payload.description = input.description.trim();
+    if (input.year) payload.year = input.year;
 
     const { data, error } = await supabase
       .from('courses')
-      .insert({
-        user_id: user.id,
-        name: input.name.trim(),
-        description: input.description?.trim(),
-        year: input.year || 2027,
-        daily_goal_minutes: input.dailyGoalMinutes,
-        color: input.color || '#5b5bd6',
-      })
+      .insert(payload)
       .select()
       .single();
 
     if (error) {
       console.error('Error creating course:', error);
-      return null;
+      // Fallback without optional columns if schema differs
+      const minimalPayload = {
+        user_id: user.id,
+        name: input.name.trim(),
+        daily_goal_minutes: input.dailyGoalMinutes || 60,
+      };
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('courses')
+        .insert(minimalPayload)
+        .select()
+        .single();
+
+      if (fallbackError) {
+        console.error('Fallback course insert failed:', fallbackError);
+        return null;
+      }
+      return fallbackData;
     }
     return data;
   },
@@ -153,6 +176,24 @@ export const courseService = {
     return data;
   },
 
+  async updateSubject(id: string, updates: Partial<SubjectInput>): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from('subjects')
+      .update({
+        ...(updates.name && { name: updates.name.trim() }),
+        ...(updates.description !== undefined && { description: updates.description.trim() }),
+        ...(updates.code !== undefined && { code: updates.code.trim() }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    return !error;
+  },
+
   async deleteSubject(id: string): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
@@ -220,6 +261,24 @@ export const courseService = {
       return null;
     }
     return data;
+  },
+
+  async updateTopic(id: string, updates: { name?: string; code?: string; sortOrder?: number }): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from('topics')
+      .update({
+        ...(updates.name && { name: updates.name.trim() }),
+        ...(updates.code !== undefined && { code: updates.code.trim() }),
+        ...(updates.sortOrder !== undefined && { sort_order: updates.sortOrder }),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    return !error;
   },
 
   async deleteTopic(id: string): Promise<boolean> {

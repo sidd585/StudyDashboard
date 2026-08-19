@@ -23,11 +23,11 @@ import {
   AlertTriangle,
   BookOpen,
   Filter,
-  Download,
-  ExternalLink,
   ChevronLeft,
   ChevronRight,
   FolderArchive,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import type { PageId } from '../components/layout/Sidebar';
 
@@ -48,16 +48,13 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
   const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Course Question Counts Summary
-  const [courseMcqCounts, setCourseMcqCounts] = useState<Record<string, number>>({});
-  const [courseSubCounts, setCourseSubCounts] = useState<Record<string, number>>({});
-
   // MCQ Questions List & Pagination
   const [mcqList, setMcqList] = useState<CloudQuestion[]>([]);
   const [totalMcqs, setTotalMcqs] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const pageSize = 25;
+  const pageSize = 20;
   const [revealedAnswers, setRevealedAnswers] = useState<Record<string, boolean>>({});
+  const [isLoadingMcqs, setIsLoadingMcqs] = useState(false);
 
   // Subjective Papers List
   const [subjectiveList, setSubjectiveList] = useState<CloudSubjectivePaper[]>([]);
@@ -67,15 +64,20 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
   const [isUploadMcqModalOpen, setIsUploadMcqModalOpen] = useState(false);
   const [isUploadSubjectiveModalOpen, setIsUploadSubjectiveModalOpen] = useState(false);
 
-  // Large Upload Success / Partial Review Summary State
-  const [uploadSummary, setUploadSummary] = useState<{
-    totalDetected: number;
-    savedCount: number;
-    uncertainCount: number;
-    uncertainQuestions: ParsedMCQCandidate[];
-    courseName: string;
-    year: number;
-  } | null>(null);
+  // Upload Form Selection States (Course -> Subject -> Topic -> File)
+  const [uploadCourseId, setUploadCourseId] = useState<string>('');
+  const [uploadSubjects, setUploadSubjects] = useState<CloudSubject[]>([]);
+  const [uploadSubjectId, setUploadSubjectId] = useState<string>('');
+  const [uploadTopics, setUploadTopics] = useState<CloudTopic[]>([]);
+  const [uploadTopicId, setUploadTopicId] = useState<string>('');
+  const [uploadYear, setUploadYear] = useState<number>(2027);
+  const [isProcessingUpload, setIsProcessingUpload] = useState(false);
+  const [uploadProgressText, setUploadProgressText] = useState<string>('');
+
+  // Upload Success Alert & Uncertain Review State
+  const [uploadSuccessMessage, setUploadSuccessMessage] = useState<string | null>(null);
+  const [uncertainReviewQuestions, setUncertainReviewQuestions] = useState<ParsedMCQCandidate[]>([]);
+  const [isUncertainModalOpen, setIsUncertainModalOpen] = useState(false);
 
   // MCQ Manual Form
   const [manualText, setManualText] = useState('');
@@ -98,22 +100,19 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
     async function loadInitialData() {
       const loadedCourses = await courseService.getCourses();
       setCourses(loadedCourses);
-
-      const mcqCounts = await questionService.getQuestionCountsByCourse();
-      setCourseMcqCounts(mcqCounts);
-
-      // Subjective counts
-      const allSubjective = await subjectiveService.getSubjectivePapers();
-      const subCounts: Record<string, number> = {};
-      allSubjective.forEach(p => {
-        subCounts[p.course_id] = (subCounts[p.course_id] || 0) + 1;
-      });
-      setCourseSubCounts(subCounts);
+      if (loadedCourses.length > 0) {
+        if (!selectedCourseId) {
+          setSelectedCourseId(loadedCourses[0].id);
+        }
+        if (!uploadCourseId) {
+          setUploadCourseId(loadedCourses[0].id);
+        }
+      }
     }
     loadInitialData();
   }, [currentUser.id]);
 
-  // Load subjects & topics for selected course
+  // Load subjects & topics for selected filter course
   useEffect(() => {
     async function loadHierarchy() {
       if (!selectedCourseId) {
@@ -123,13 +122,47 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       }
       const [subs, tops] = await Promise.all([
         courseService.getSubjects(selectedCourseId),
-        courseService.getTopics(selectedCourseId),
+        courseService.getTopics(selectedCourseId, selectedSubjectId || undefined),
       ]);
       setSubjects(subs);
-      setTopics(tops.filter(t => !t.parent_topic_id));
+      setTopics(tops);
     }
     loadHierarchy();
-  }, [selectedCourseId]);
+  }, [selectedCourseId, selectedSubjectId]);
+
+  // Load upload subjects when upload course changes
+  useEffect(() => {
+    async function loadUploadSubs() {
+      if (!uploadCourseId) {
+        setUploadSubjects([]);
+        setUploadSubjectId('');
+        return;
+      }
+      const subs = await courseService.getSubjects(uploadCourseId);
+      setUploadSubjects(subs);
+      if (subs.length > 0) {
+        setUploadSubjectId(subs[0].id);
+      } else {
+        setUploadSubjectId('');
+      }
+    }
+    loadUploadSubs();
+  }, [uploadCourseId]);
+
+  // Load upload topics when upload subject changes
+  useEffect(() => {
+    async function loadUploadTops() {
+      if (!uploadCourseId) {
+        setUploadTopics([]);
+        setUploadTopicId('');
+        return;
+      }
+      const tops = await courseService.getTopics(uploadCourseId, uploadSubjectId || undefined);
+      setUploadTopics(tops);
+      setUploadTopicId('');
+    }
+    loadUploadTops();
+  }, [uploadCourseId, uploadSubjectId]);
 
   // Query MCQ list
   const loadMcqs = async () => {
@@ -138,17 +171,24 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       setTotalMcqs(0);
       return;
     }
-    const res = await questionService.getQuestions({
-      courseId: selectedCourseId,
-      subjectId: selectedSubjectId || undefined,
-      topicId: selectedTopicId || undefined,
-      year: selectedYear,
-      search: searchQuery || undefined,
-      page: currentPage,
-      pageSize,
-    });
-    setMcqList(res.questions);
-    setTotalMcqs(res.total);
+    setIsLoadingMcqs(true);
+    try {
+      const res = await questionService.getQuestions({
+        courseId: selectedCourseId,
+        subjectId: selectedSubjectId || undefined,
+        topicId: selectedTopicId || undefined,
+        year: selectedYear,
+        search: searchQuery || undefined,
+        page: currentPage,
+        pageSize,
+      });
+      setMcqList(res.questions);
+      setTotalMcqs(res.total);
+    } catch (err) {
+      console.error('Error loading MCQs:', err);
+    } finally {
+      setIsLoadingMcqs(false);
+    }
   };
 
   // Query Subjective list
@@ -157,13 +197,17 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       setSubjectiveList([]);
       return;
     }
-    const list = await subjectiveService.getSubjectivePapers({
-      courseId: selectedCourseId,
-      subjectId: selectedSubjectId || undefined,
-      topicId: selectedTopicId || undefined,
-      year: selectedYear,
-    });
-    setSubjectiveList(list);
+    try {
+      const list = await subjectiveService.getSubjectivePapers({
+        courseId: selectedCourseId,
+        subjectId: selectedSubjectId || undefined,
+        topicId: selectedTopicId || undefined,
+        year: selectedYear,
+      });
+      setSubjectiveList(list);
+    } catch (err) {
+      console.error('Error loading subjective papers:', err);
+    }
   };
 
   useEffect(() => {
@@ -172,19 +216,36 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
     } else {
       loadSubjective();
     }
-  }, [activeTab, selectedCourseId, selectedSubjectId, selectedTopicId, selectedYear, searchQuery, currentPage]);
+  }, [selectedCourseId, selectedSubjectId, selectedTopicId, selectedYear, searchQuery, currentPage, activeTab]);
 
-  const toggleAnswerReveal = (questionId: string) => {
-    setRevealedAnswers(prev => ({
-      ...prev,
-      [questionId]: !prev[questionId],
-    }));
+  // Toggle reveal answer for single MCQ card
+  const toggleReveal = (qId: string) => {
+    setRevealedAnswers(prev => ({ ...prev, [qId]: !prev[qId] }));
   };
 
-  // Handle Save Manual MCQ
+  // Delete MCQ
+  const handleDeleteMcq = async (id: string) => {
+    if (!window.confirm('Delete this question permanently?')) return;
+    const success = await questionService.deleteQuestion(id);
+    if (success) {
+      setMcqList(prev => prev.filter(q => q.id !== id));
+      setTotalMcqs(prev => Math.max(0, prev - 1));
+    }
+  };
+
+  // Delete Subjective Paper
+  const handleDeleteSubjectivePaper = async (id: string) => {
+    if (!window.confirm('Delete this subjective paper?')) return;
+    const success = await subjectiveService.deleteSubjectivePaper(id);
+    if (success) {
+      setSubjectiveList(prev => prev.filter(p => p.id !== id));
+    }
+  };
+
+  // Handle Save Manual Single MCQ
   const handleSaveManualMcq = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCourseId || !manualText.trim()) return;
+    if (!selectedCourseId || !manualText.trim() || !manualA.trim() || !manualB.trim()) return;
 
     await questionService.createQuestion({
       courseId: selectedCourseId,
@@ -193,8 +254,8 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       questionText: manualText.trim(),
       optionA: manualA.trim(),
       optionB: manualB.trim(),
-      optionC: manualC.trim(),
-      optionD: manualD.trim(),
+      optionC: manualC.trim() || 'None',
+      optionD: manualD.trim() || 'All of the above',
       correctAnswer: manualCorrect,
       explanation: manualExplanation.trim() || null,
       year: selectedYear || 2027,
@@ -210,66 +271,140 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
     loadMcqs();
   };
 
-  // Handle Large / Bulk MCQ Upload via PDF or text
+  // Handle MCQ File Upload (PDF, CSV, JSON, Image)
   const handleMcqFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !selectedCourseId) return;
+    if (!file || !uploadCourseId) return;
+
+    setIsProcessingUpload(true);
+    setUploadProgressText('Parsing questions and extracting options...');
 
     try {
-      const result = await importMCQsFromPDF(file);
-      const validCandidates = result.questions.filter(q => q.status === 'valid');
-      const uncertainCandidates = result.questions.filter(q => q.status !== 'valid');
+      let validCandidates: ParsedMCQCandidate[] = [];
+      let uncertainCandidates: ParsedMCQCandidate[] = [];
+
+      // Check file type
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        const json = JSON.parse(text);
+        const parsed = Array.isArray(json) ? json : json.questions || [];
+        validCandidates = parsed.map((q: any, i: number) => ({
+          tempId: `json-${i}`,
+          originalQuestionNumber: i + 1,
+          questionText: q.question || q.questionText,
+          options: [
+            { id: 'A', text: q.optionA || q.options?.[0]?.text || q.options?.A || '' },
+            { id: 'B', text: q.optionB || q.options?.[1]?.text || q.options?.B || '' },
+            { id: 'C', text: q.optionC || q.options?.[2]?.text || q.options?.C || '' },
+            { id: 'D', text: q.optionD || q.options?.[3]?.text || q.options?.D || '' },
+          ],
+          detectedAnswer: (q.correctAnswer || q.correct_answer || 'A').toUpperCase() as any,
+          explanation: q.explanation || '',
+          confidence: 'high',
+          status: 'valid',
+          extractionMethod: 'native',
+          issues: [],
+          approved: true,
+        }));
+      } else if (file.name.endsWith('.csv')) {
+        const text = await file.text();
+        const result = importMCQsFromText(text);
+        validCandidates = result.questions.filter(q => q.status === 'valid');
+        uncertainCandidates = result.questions.filter(q => q.status !== 'valid');
+      } else {
+        // PDF or image document
+        const result = await importMCQsFromPDF(file, {
+          onProgress: (stage) => setUploadProgressText(stage),
+        });
+        validCandidates = result.questions.filter(q => q.status === 'valid');
+        uncertainCandidates = result.questions.filter(q => q.status !== 'valid');
+      }
 
       // Convert valid candidates to QuestionInsertInput
       const inputs: QuestionInsertInput[] = validCandidates.map(c => ({
-        courseId: selectedCourseId,
-        subjectId: selectedSubjectId || null,
-        topicId: selectedTopicId || null,
+        courseId: uploadCourseId,
+        subjectId: uploadSubjectId || null,
+        topicId: uploadTopicId || null,
         questionText: c.questionText,
         optionA: c.options.find(o => o.id === 'A')?.text || '',
         optionB: c.options.find(o => o.id === 'B')?.text || '',
         optionC: c.options.find(o => o.id === 'C')?.text || '',
         optionD: c.options.find(o => o.id === 'D')?.text || '',
-        correctAnswer: c.detectedAnswer || 'UNKNOWN',
+        correctAnswer: (c.detectedAnswer as any) || 'A',
         explanation: c.explanation || null,
-        year: selectedYear || 2027,
+        year: uploadYear || 2027,
         sourceFileId: file.name,
       }));
 
-      // Batch insert valid questions into Supabase
-      const insertRes = await questionService.createQuestionsBatch(inputs);
-
-      const courseName = courses.find(c => c.id === selectedCourseId)?.name || 'Course';
-
-      // Set summary dialog (Never flood screen with 200 cards)
-      setUploadSummary({
-        totalDetected: result.questions.length,
-        savedCount: insertRes.inserted,
-        uncertainCount: uncertainCandidates.length,
-        uncertainQuestions: uncertainCandidates,
-        courseName,
-        year: selectedYear || 2027,
-      });
+      // Directly batch save valid questions to Supabase
+      if (inputs.length > 0) {
+        await questionService.createQuestionsBatch(inputs);
+      }
 
       setIsUploadMcqModalOpen(false);
+
+      if (validCandidates.length > 0 && uncertainCandidates.length === 0) {
+        setUploadSuccessMessage(
+          `✓ ${validCandidates.length} questions uploaded successfully — ready for practice!`
+        );
+        setTimeout(() => setUploadSuccessMessage(null), 6000);
+      } else if (uncertainCandidates.length > 0) {
+        setUncertainReviewQuestions(uncertainCandidates);
+        setIsUncertainModalOpen(true);
+        if (validCandidates.length > 0) {
+          setUploadSuccessMessage(
+            `✓ ${validCandidates.length} questions saved directly. ${uncertainCandidates.length} question(s) need quick review.`
+          );
+        }
+      } else {
+        alert('No valid MCQs could be detected in this document. Please check the file format.');
+      }
+
       loadMcqs();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error importing MCQs:', err);
-      alert('Failed to parse MCQ file.');
+      alert(`Failed to parse file: ${err.message || 'Error processing document'}`);
+    } finally {
+      setIsProcessingUpload(false);
+      setUploadProgressText('');
     }
+  };
+
+  // Save reviewed uncertain questions
+  const handleSaveUncertainQuestions = async () => {
+    const inputs: QuestionInsertInput[] = uncertainReviewQuestions.map(c => ({
+      courseId: uploadCourseId,
+      subjectId: uploadSubjectId || null,
+      topicId: uploadTopicId || null,
+      questionText: c.questionText,
+      optionA: c.options.find(o => o.id === 'A')?.text || '',
+      optionB: c.options.find(o => o.id === 'B')?.text || '',
+      optionC: c.options.find(o => o.id === 'C')?.text || '',
+      optionD: c.options.find(o => o.id === 'D')?.text || '',
+      correctAnswer: (c.detectedAnswer as any) || 'A',
+      explanation: c.explanation || null,
+      year: uploadYear || 2027,
+    }));
+
+    if (inputs.length > 0) {
+      await questionService.createQuestionsBatch(inputs);
+    }
+    setIsUncertainModalOpen(false);
+    setUncertainReviewQuestions([]);
+    loadMcqs();
   };
 
   // Handle Save Subjective Paper
   const handleUploadSubjective = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCourseId || !subTitle.trim() || !subFile) return;
+    if (!uploadCourseId || !subTitle.trim() || !subFile) return;
 
     setIsUploadingSub(true);
     try {
       await subjectiveService.uploadSubjectivePaper({
-        courseId: selectedCourseId,
-        subjectId: selectedSubjectId || null,
-        topicId: selectedTopicId || null,
+        courseId: uploadCourseId,
+        subjectId: uploadSubjectId || null,
+        topicId: uploadTopicId || null,
         paperTitle: subTitle.trim(),
         year: subYear,
         file: subFile,
@@ -289,7 +424,7 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
     }
   };
 
-  // Secure View Paper in New Tab
+  // View Subjective Paper URL
   const handleViewSubjectivePaper = async (paper: CloudSubjectivePaper) => {
     const url = await subjectiveService.getSecureViewUrl(paper.file_path);
     if (url) {
@@ -302,16 +437,16 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
   const totalPages = Math.ceil(totalMcqs / pageSize) || 1;
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#101828] dark:text-[#f8f9fc] transition-colors">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
+          <h1 className="text-xl font-extrabold text-[#101828] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
             <HelpCircle className="w-5 h-5 text-[#5b5bd6]" />
             <span>Question Bank</span>
           </h1>
           <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
-            Cloud archives for Multiple Choice Questions and Subjective/Long Question papers.
+            Manage Multiple Choice Questions and Subjective/Long Question papers by Course and Subject.
           </p>
         </div>
 
@@ -332,12 +467,16 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
               <Button
                 variant="primary"
                 size="sm"
-                className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold text-xs"
+                className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold text-xs shadow-xs"
                 leftIcon={<Upload className="w-3.5 h-3.5" />}
-                onClick={() => setIsUploadMcqModalOpen(true)}
+                onClick={() => {
+                  setUploadCourseId(selectedCourseId);
+                  setUploadSubjectId(selectedSubjectId);
+                  setIsUploadMcqModalOpen(true);
+                }}
                 disabled={!selectedCourseId}
               >
-                Upload MCQ PDF
+                Upload Questions
               </Button>
             </>
           ) : (
@@ -346,7 +485,11 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
               size="sm"
               className="bg-[#0284c7] hover:bg-[#0369a1] text-white font-bold text-xs"
               leftIcon={<Upload className="w-3.5 h-3.5" />}
-              onClick={() => setIsUploadSubjectiveModalOpen(true)}
+              onClick={() => {
+                setUploadCourseId(selectedCourseId);
+                setUploadSubjectId(selectedSubjectId);
+                setIsUploadSubjectiveModalOpen(true);
+              }}
               disabled={!selectedCourseId}
             >
               Upload Subjective Paper
@@ -355,6 +498,26 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
         </div>
       </div>
 
+      {/* Success Notification Alert */}
+      {uploadSuccessMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-bold text-xs sm:text-sm flex items-center justify-between animate-fade-in shadow-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{uploadSuccessMessage}</span>
+          </div>
+          {onNavigate && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white dark:bg-[#141824] text-emerald-700 dark:text-emerald-300 border-emerald-500/30 font-bold text-xs"
+              onClick={() => onNavigate('practice')}
+            >
+              Start Practice →
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* Main Tabs: MCQ QUESTIONS vs SUBJECTIVE PAPERS */}
       <div className="flex items-center gap-2 border-b border-[#e2e8f0] dark:border-[#23293d] pb-2">
         <button
@@ -362,11 +525,11 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'mcq'
               ? 'bg-[#5b5bd6] text-white shadow-xs'
-              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+              : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
           }`}
         >
           <HelpCircle className="w-4 h-4" />
-          <span>MCQ Questions</span>
+          <span>MCQ Questions ({totalMcqs})</span>
         </button>
 
         <button
@@ -374,400 +537,402 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'subjective'
               ? 'bg-[#0284c7] text-white shadow-xs'
-              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+              : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
           }`}
         >
           <FileText className="w-4 h-4" />
-          <span>Subjective / Long Questions</span>
+          <span>Subjective Question Papers ({subjectiveList.length})</span>
         </button>
       </div>
 
-      {/* Course Collection Summary Cards (Requirement 32) */}
-      {!selectedCourseId ? (
-        <div className="space-y-4">
-          <h2 className="text-xs font-bold text-[#64748b] uppercase tracking-wider">
-            Select Course Collection
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {courses.map(c => {
-              const mcqCount = courseMcqCounts[c.id] || 0;
-              const subCount = courseSubCounts[c.id] || 0;
-              return (
-                <Card
-                  key={c.id}
-                  className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4 hover:border-[#5b5bd6]/50 transition-all"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-base font-extrabold text-[#172033] dark:text-[#f8f9fc]">{c.name}</h3>
-                      {c.year && (
-                        <span className="text-[11px] font-bold text-[#5b5bd6]">Exam Year {c.year}</span>
-                      )}
-                    </div>
-                    <span
-                      className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: c.color || '#5b5bd6' }}
-                    />
-                  </div>
+      {/* Cascading Filters Bar */}
+      <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {/* 1. Course */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Course</label>
+            <select
+              value={selectedCourseId}
+              onChange={e => {
+                setSelectedCourseId(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+            >
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
-                    <div className="p-2.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-                      <span className="text-[10px] font-bold text-[#64748b] uppercase">MCQs</span>
-                      <p className="text-base font-extrabold text-[#5b5bd6]">{mcqCount}</p>
-                    </div>
-                    <div className="p-2.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-                      <span className="text-[10px] font-bold text-[#64748b] uppercase">Subjective</span>
-                      <p className="text-base font-extrabold text-[#0284c7]">{subCount} Files</p>
-                    </div>
-                  </div>
+          {/* 2. Subject */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Subject</label>
+            <select
+              value={selectedSubjectId}
+              onChange={e => {
+                setSelectedSubjectId(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+            >
+              <option value="">All Subjects</option>
+              {subjects.map(s => (
+                <option key={s.id} value={s.id}>{s.name} {s.code ? `(${s.code})` : ''}</option>
+              ))}
+            </select>
+          </div>
 
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="w-full font-bold bg-[#5b5bd6] text-white"
-                    onClick={() => setSelectedCourseId(c.id)}
-                  >
-                    Open Collection
-                  </Button>
-                </Card>
-              );
-            })}
+          {/* 3. Topic */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Topic</label>
+            <select
+              value={selectedTopicId}
+              onChange={e => {
+                setSelectedTopicId(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+            >
+              <option value="">All Topics</option>
+              {topics.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 4. Search */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Search Questions</label>
+            <div className="relative flex items-center">
+              <Search className="w-3.5 h-3.5 absolute left-3 text-[#94a3b8]" />
+              <input
+                type="text"
+                placeholder="Keywords..."
+                value={searchQuery}
+                onChange={e => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="w-full pl-9 pr-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              />
+            </div>
           </div>
         </div>
-      ) : (
-        /* Active Collection Opened View with Filters (Requirement 33) */
-        <div className="space-y-5">
-          {/* Active Filter Bar */}
-          <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSelectedCourseId('')}
-                  className="text-xs font-bold text-[#5b5bd6] hover:underline flex items-center gap-1"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                  <span>All Collections</span>
-                </button>
-                <span className="text-[#cbd5e1]">|</span>
-                <span className="text-xs font-bold text-[#172033] dark:text-white">
-                  {courses.find(c => c.id === selectedCourseId)?.name}
-                </span>
-              </div>
+      </Card>
 
-              {/* Search Bar */}
-              <div className="relative w-full md:w-64">
-                <Search className="w-3.5 h-3.5 text-[#94a3b8] absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  placeholder="Search questions or keywords..."
-                  className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
-                />
-              </div>
-            </div>
-
-            {/* Filter Dropdowns */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
-              <select
-                value={selectedCourseId}
-                onChange={e => setSelectedCourseId(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
-              >
-                {courses.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={selectedSubjectId}
-                onChange={e => setSelectedSubjectId(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
-              >
-                <option value="">All Subjects</option>
-                {subjects.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={selectedTopicId}
-                onChange={e => setSelectedTopicId(e.target.value)}
-                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
-              >
-                <option value="">All Topics</option>
-                {topics.map(t => (
-                  <option key={t.id} value={t.id}>{t.code ? `${t.code}. ` : ''}{t.name}</option>
-                ))}
-              </select>
-
-              <select
-                value={selectedYear || ''}
-                onChange={e => setSelectedYear(e.target.value ? parseInt(e.target.value) : undefined)}
-                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
-              >
-                <option value="">All Years</option>
-                <option value="2027">2027</option>
-                <option value="2026">2026</option>
-                <option value="2025">2025</option>
-              </select>
-            </div>
-          </Card>
-
-          {/* TAB 1: MCQ QUESTIONS LIST (Paginated, Hidden answers until click) */}
-          {activeTab === 'mcq' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
-                <span>Showing {mcqList.length} of {totalMcqs} MCQs</span>
-                {onNavigate && (
-                  <button
-                    onClick={() => onNavigate('practice', { courseId: selectedCourseId })}
-                    className="text-[#5b5bd6] hover:underline"
+      {/* ================= TAB 1: MCQ QUESTIONS LIST ================= */}
+      {activeTab === 'mcq' && (
+        <div className="space-y-4">
+          {isLoadingMcqs ? (
+            <Card className="p-12 text-center text-xs text-[#64748b]">
+              <p className="animate-pulse font-bold">Loading questions...</p>
+            </Card>
+          ) : mcqList.length > 0 ? (
+            <div className="space-y-3">
+              {mcqList.map((q, idx) => {
+                const isRevealed = revealedAnswers[q.id];
+                const qNum = (currentPage - 1) * pageSize + idx + 1;
+                return (
+                  <Card
+                    key={q.id}
+                    className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-3.5 hover:border-[#5b5bd6]/40 transition-colors"
                   >
-                    Go to Practice →
-                  </button>
-                )}
-              </div>
-
-              {mcqList.length > 0 ? (
-                <div className="space-y-3">
-                  {mcqList.map((q, idx) => {
-                    const isRevealed = revealedAnswers[q.id];
-                    return (
-                      <Card
-                        key={q.id}
-                        className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <h4 className="font-bold text-xs sm:text-sm text-[#172033] dark:text-[#f8f9fc] leading-snug">
-                            <span className="text-[#5b5bd6] font-mono mr-1">
-                              {(currentPage - 1) * pageSize + idx + 1}.
-                            </span>
-                            {q.question_text}
-                          </h4>
-
-                          <button
-                            onClick={() => toggleAnswerReveal(q.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#5b5bd6] hover:bg-[#eef2f6]"
-                          >
-                            {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                            <span>{isRevealed ? 'Hide Answer' : 'View Answer'}</span>
-                          </button>
-                        </div>
-
-                        {/* Options A, B, C, D */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'A' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
-                            <span className="font-bold text-[#5b5bd6] mr-1.5">A.</span> {q.option_a}
-                          </div>
-                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'B' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
-                            <span className="font-bold text-[#5b5bd6] mr-1.5">B.</span> {q.option_b}
-                          </div>
-                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'C' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
-                            <span className="font-bold text-[#5b5bd6] mr-1.5">C.</span> {q.option_c}
-                          </div>
-                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'D' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
-                            <span className="font-bold text-[#5b5bd6] mr-1.5">D.</span> {q.option_d}
-                          </div>
-                        </div>
-
-                        {/* Revealed Explanation */}
-                        {isRevealed && (
-                          <div className="p-3 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-xs space-y-1 animate-fade-in">
-                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
-                              Correct Answer: Option {q.correct_answer || 'UNKNOWN'}
-                            </span>
-                            {q.explanation && (
-                              <p className="text-[#64748b] dark:text-[#9496a8]">{q.explanation}</p>
-                            )}
-                          </div>
-                        )}
-                      </Card>
-                    );
-                  })}
-
-                  {/* Pagination Controls */}
-                  {totalPages > 1 && (
-                    <div className="flex items-center justify-center gap-2 pt-4">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        leftIcon={<ChevronLeft className="w-3.5 h-3.5" />}
-                      >
-                        Previous
-                      </Button>
-                      <span className="text-xs font-bold text-[#64748b] px-3">
-                        Page {currentPage} of {totalPages}
-                      </span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={currentPage >= totalPages}
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        rightIcon={<ChevronRight className="w-3.5 h-3.5" />}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <Card className="p-8 text-center text-xs text-[#64748b]">
-                  <p>No MCQ questions found in this collection.</p>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="mt-3 bg-[#5b5bd6] text-white font-bold"
-                    onClick={() => setIsUploadMcqModalOpen(true)}
-                  >
-                    Upload MCQ PDF
-                  </Button>
-                </Card>
-              )}
-            </div>
-          )}
-
-          {/* TAB 2: SUBJECTIVE / LONG QUESTIONS ARCHIVE (Requirement 38, 39) */}
-          {activeTab === 'subjective' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
-                <span>{subjectiveList.length} Subjective Papers Archived</span>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="bg-[#0284c7] hover:bg-[#0369a1] text-white font-bold text-xs"
-                  leftIcon={<Plus className="w-3.5 h-3.5" />}
-                  onClick={() => setIsUploadSubjectiveModalOpen(true)}
-                >
-                  + Upload Paper
-                </Button>
-              </div>
-
-              {subjectiveList.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {subjectiveList.map(paper => (
-                    <Card
-                      key={paper.id}
-                      className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3 flex flex-col justify-between"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <Badge variant="brand" size="sm">Year {paper.year || 2027}</Badge>
-                          <FileText className="w-4 h-4 text-[#0284c7]" />
-                        </div>
-                        <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc] line-clamp-2">
-                          {paper.paper_title}
-                        </h4>
-                        <p className="text-[11px] text-[#64748b] truncate">{paper.file_name}</p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3">
+                        <span className="w-7 h-7 rounded-xl bg-[#5b5bd6]/10 text-[#5b5bd6] dark:text-[#8282ea] font-extrabold text-xs flex items-center justify-center shrink-0">
+                          {qNum}
+                        </span>
+                        <h3 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc] leading-relaxed">
+                          {q.question_text}
+                        </h3>
                       </div>
 
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        className="w-full font-bold bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs"
-                        leftIcon={<ExternalLink className="w-3.5 h-3.5" />}
-                        onClick={() => handleViewSubjectivePaper(paper)}
+                      <button
+                        onClick={() => handleDeleteMcq(q.id)}
+                        className="p-1 text-[#94a3b8] hover:text-rose-600 transition-colors shrink-0"
+                        title="Delete MCQ"
                       >
-                        View Paper Securely
-                      </Button>
-                    </Card>
-                  ))}
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Options Grid (A, B, C, D) */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      {[
+                        { id: 'A', text: q.option_a },
+                        { id: 'B', text: q.option_b },
+                        { id: 'C', text: q.option_c },
+                        { id: 'D', text: q.option_d },
+                      ].map(opt => {
+                        const isCorrectOption = opt.id === q.correct_answer;
+                        return (
+                          <div
+                            key={opt.id}
+                            className={`p-2.5 rounded-xl border flex items-center gap-2.5 ${
+                              isRevealed && isCorrectOption
+                                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-800 dark:text-emerald-300 font-bold'
+                                : 'bg-[#f8fafc] dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'
+                            }`}
+                          >
+                            <span className="w-5 h-5 rounded-lg bg-white dark:bg-[#141824] border border-[#d0d5dd] dark:border-[#2b334d] text-[11px] font-bold flex items-center justify-center shrink-0">
+                              {opt.id}
+                            </span>
+                            <span>{opt.text}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Reveal Answer Footer */}
+                    <div className="flex items-center justify-between pt-2 border-t border-[#e2e8f0] dark:border-[#23293d] text-xs">
+                      <button
+                        onClick={() => toggleReveal(q.id)}
+                        className="font-bold text-[#5b5bd6] dark:text-[#8282ea] hover:underline flex items-center gap-1.5"
+                      >
+                        {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        <span>{isRevealed ? 'Hide Correct Answer' : 'Show Answer'}</span>
+                      </button>
+
+                      {isRevealed && (
+                        <div className="font-bold text-emerald-600 dark:text-emerald-400">
+                          Correct Answer: Option {q.correct_answer}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between p-4 bg-white dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] rounded-2xl text-xs">
+                  <span className="text-[#64748b]">Page {currentPage} of {totalPages}</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    >
+                      Next
+                    </Button>
+                  </div>
                 </div>
-              ) : (
-                <Card className="p-8 text-center text-xs text-[#64748b]">
-                  <p>No subjective or long question papers archived for this course yet.</p>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    className="mt-3 bg-[#0284c7] text-white font-bold"
-                    onClick={() => setIsUploadSubjectiveModalOpen(true)}
-                  >
-                    Upload First Subjective Paper
-                  </Button>
-                </Card>
               )}
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ================= MODAL: LARGE UPLOAD SUMMARY (Requirement 35, 36) ================= */}
-      {uploadSummary && (
-        <Modal
-          isOpen={true}
-          onClose={() => setUploadSummary(null)}
-          title="Upload Summary"
-          size="md"
-        >
-          <div className="space-y-5 text-center text-[#172033] dark:text-[#f8f9fc]">
-            <div className="w-14 h-14 rounded-full bg-[#f4fbf7] dark:bg-[#122820] text-emerald-600 border border-emerald-500/30 flex items-center justify-center mx-auto text-xl font-bold">
-              ✓
-            </div>
-
-            <div className="space-y-1">
-              <h3 className="text-lg font-bold text-[#172033] dark:text-white">
-                {uploadSummary.savedCount} MCQs Added Successfully
-              </h3>
-              <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
-                Course: {uploadSummary.courseName} · Year: {uploadSummary.year}
-              </p>
-            </div>
-
-            {uploadSummary.uncertainCount > 0 && (
-              <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-semibold">
-                ⚠ {uploadSummary.uncertainCount} questions need review due to missing options or answers.
-              </div>
-            )}
-
-            <div className="flex items-center justify-center gap-3 pt-3">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setUploadSummary(null)}
-              >
-                Close
-              </Button>
-              {onNavigate && (
+          ) : (
+            <Card className="p-12 text-center text-xs text-[#64748b] space-y-3">
+              <HelpCircle className="w-8 h-8 mx-auto text-[#94a3b8] opacity-50" />
+              <p className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">No questions found</p>
+              <p>Upload a PDF, CSV, or JSON question bank to practice.</p>
+              <div className="pt-2">
                 <Button
                   variant="primary"
                   size="sm"
                   className="bg-[#5b5bd6] text-white font-bold"
-                  onClick={() => {
-                    setUploadSummary(null);
-                    onNavigate('practice', { courseId: selectedCourseId });
-                  }}
+                  leftIcon={<Upload className="w-3.5 h-3.5" />}
+                  onClick={() => setIsUploadMcqModalOpen(true)}
+                  disabled={!selectedCourseId}
                 >
-                  Go to Practice →
+                  Upload Questions
                 </Button>
-              )}
-            </div>
-          </div>
-        </Modal>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
 
-      {/* ================= MODAL: UPLOAD MCQ PDF ================= */}
+      {/* ================= TAB 2: SUBJECTIVE PAPERS ================= */}
+      {activeTab === 'subjective' && (
+        <div className="space-y-4">
+          {subjectiveList.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {subjectiveList.map(paper => (
+                <Card
+                  key={paper.id}
+                  className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4 flex flex-col justify-between"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#0284c7]/10 text-[#0284c7]">
+                        {paper.year} Paper
+                      </span>
+                      <button
+                        onClick={() => handleDeleteSubjectivePaper(paper.id)}
+                        className="p-1 text-[#94a3b8] hover:text-rose-600 transition-colors"
+                        title="Delete Paper"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <h3 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">
+                      {paper.paper_title}
+                    </h3>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full text-xs font-bold bg-[#f8fafc] dark:bg-[#181d2f] text-[#0284c7] border-[#e2e8f0] dark:border-[#2b334d]"
+                    leftIcon={<FileText className="w-3.5 h-3.5" />}
+                    onClick={() => handleViewSubjectivePaper(paper)}
+                  >
+                    Open Question Paper
+                  </Button>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card className="p-12 text-center text-xs text-[#64748b] space-y-3">
+              <FileText className="w-8 h-8 mx-auto text-[#94a3b8] opacity-50" />
+              <p className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">No subjective papers uploaded yet</p>
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-[#0284c7] text-white font-bold"
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+                onClick={() => setIsUploadSubjectiveModalOpen(true)}
+                disabled={!selectedCourseId}
+              >
+                Upload Subjective Paper
+              </Button>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ================= MODAL: UPLOAD MCQ FILE ================= */}
       <Modal
         isOpen={isUploadMcqModalOpen}
         onClose={() => setIsUploadMcqModalOpen(false)}
-        title="Upload MCQ PDF"
+        title="Upload MCQ Question Bank"
         size="md"
       >
-        <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
-          <p className="text-xs text-[#64748b]">
-            Upload a past question paper or practice PDF. The parser will extract all questions, map options A/B/C/D, and save valid questions directly into the database.
+        <div className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+            Select target Course and Subject first, then upload your PDF, CSV, or JSON file. Valid MCQs are saved directly for practice.
           </p>
 
-          <div className="border-2 border-dashed border-[#cbd5e1] dark:border-[#2b334d] rounded-2xl p-6 text-center space-y-2">
-            <Upload className="w-8 h-8 text-[#5b5bd6] mx-auto animate-bounce" />
-            <p className="text-xs font-bold">Select Question PDF</p>
+          {/* 1. Course Selection (Required) */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Course *</label>
+            <select
+              value={uploadCourseId}
+              onChange={e => setUploadCourseId(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+            >
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 2. Subject Selection (Required) */}
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Subject belonging to this Course *</label>
+            <select
+              value={uploadSubjectId}
+              onChange={e => setUploadSubjectId(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+            >
+              <option value="">General / All Subjects</option>
+              {uploadSubjects.map(s => (
+                <option key={s.id} value={s.id}>{s.name} {s.code ? `(${s.code})` : ''}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 3. Topic & Year (Optional) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Topic (Optional)</label>
+              <select
+                value={uploadTopicId}
+                onChange={e => setUploadTopicId(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              >
+                <option value="">Select Topic</option>
+                {uploadTopics.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Exam Year (Optional)</label>
+              <input
+                type="number"
+                value={uploadYear}
+                onChange={e => setUploadYear(parseInt(e.target.value) || 2027)}
+                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none"
+              />
+            </div>
+          </div>
+
+          {/* 4. File Drop Area */}
+          <div className="border-2 border-dashed border-[#d0d5dd] dark:border-[#2b334d] rounded-2xl p-6 text-center space-y-2">
+            <Upload className="w-8 h-8 text-[#5b5bd6] mx-auto" />
+            <p className="text-xs font-bold">Select MCQ File (.pdf, .csv, .json)</p>
             <input
               type="file"
-              accept=".pdf"
+              accept=".pdf,.csv,.json,.txt"
               onChange={handleMcqFileUpload}
-              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#5b5bd6]/10 file:text-[#5b5bd6] cursor-pointer"
+              disabled={isProcessingUpload || !uploadCourseId}
+              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#5b5bd6]/10 file:text-[#5b5bd6] cursor-pointer disabled:opacity-50"
             />
+          </div>
+
+          {isProcessingUpload && (
+            <div className="p-3 bg-[#5b5bd6]/10 text-[#5b5bd6] rounded-xl text-xs font-bold text-center animate-pulse">
+              {uploadProgressText || 'Extracting questions and batch saving...'}
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* ================= MODAL: UNCERTAIN QUESTIONS REVIEW ================= */}
+      <Modal
+        isOpen={isUncertainModalOpen}
+        onClose={() => setIsUncertainModalOpen(false)}
+        title={`Review Incomplete Questions (${uncertainReviewQuestions.length})`}
+        size="lg"
+      >
+        <div className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+            Valid questions have already been stored directly. These {uncertainReviewQuestions.length} questions had uncertain options or missing answer keys.
+          </p>
+
+          <div className="max-h-80 overflow-y-auto space-y-3 p-1">
+            {uncertainReviewQuestions.map((q, idx) => (
+              <div key={idx} className="p-3.5 rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-500/5 text-xs space-y-2">
+                <p className="font-bold">{idx + 1}. {q.questionText}</p>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  {q.options.map(o => (
+                    <div key={o.id}><strong>{o.id}:</strong> {o.text || '---'}</div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setIsUncertainModalOpen(false)}>
+              Discard Incomplete
+            </Button>
+            <Button variant="primary" size="sm" onClick={handleSaveUncertainQuestions} className="bg-[#5b5bd6] text-white font-bold">
+              Save All
+            </Button>
           </div>
         </div>
       </Modal>
@@ -779,15 +944,15 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
         title="Add Single MCQ"
         size="md"
       >
-        <form onSubmit={handleSaveManualMcq} className="space-y-3.5 text-[#172033] dark:text-[#f8f9fc]">
+        <form onSubmit={handleSaveManualMcq} className="space-y-3.5 text-[#101828] dark:text-[#f8f9fc]">
           <div className="space-y-1">
-            <label className="block text-xs font-bold">Question Text *</label>
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Question Text *</label>
             <textarea
               value={manualText}
               onChange={e => setManualText(e.target.value)}
               placeholder="Type the question..."
               required
-              className="w-full h-16 px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none resize-none"
+              className="w-full h-16 px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none resize-none focus:border-[#5b5bd6]"
             />
           </div>
 
@@ -798,7 +963,7 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
               value={manualA}
               onChange={e => setManualA(e.target.value)}
               required
-              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
             <input
               type="text"
@@ -806,38 +971,49 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
               value={manualB}
               onChange={e => setManualB(e.target.value)}
               required
-              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
             <input
               type="text"
-              placeholder="Option C *"
+              placeholder="Option C"
               value={manualC}
               onChange={e => setManualC(e.target.value)}
-              required
-              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
             <input
               type="text"
-              placeholder="Option D *"
+              placeholder="Option D"
               value={manualD}
               onChange={e => setManualD(e.target.value)}
-              required
-              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-xs font-bold">Correct Option</label>
-            <select
-              value={manualCorrect}
-              onChange={e => setManualCorrect(e.target.value as any)}
-              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold outline-none"
-            >
-              <option value="A">Option A</option>
-              <option value="B">Option B</option>
-              <option value="C">Option C</option>
-              <option value="D">Option D</option>
-            </select>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Correct Option</label>
+              <select
+                value={manualCorrect}
+                onChange={e => setManualCorrect(e.target.value as any)}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] font-bold outline-none"
+              >
+                <option value="A">Option A</option>
+                <option value="B">Option B</option>
+                <option value="C">Option C</option>
+                <option value="D">Option D</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Explanation (Optional)</label>
+              <input
+                type="text"
+                placeholder="Reason or formula..."
+                value={manualExplanation}
+                onChange={e => setManualExplanation(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
+              />
+            </div>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
@@ -854,31 +1030,31 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
         title="Upload Subjective / Long Question Paper"
         size="md"
       >
-        <form onSubmit={handleUploadSubjective} className="space-y-3.5 text-[#172033] dark:text-[#f8f9fc]">
+        <form onSubmit={handleUploadSubjective} className="space-y-3.5 text-[#101828] dark:text-[#f8f9fc]">
           <div className="space-y-1">
-            <label className="block text-xs font-bold">Paper Title *</label>
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Paper Title *</label>
             <input
               type="text"
               value={subTitle}
               onChange={e => setSubTitle(e.target.value)}
               placeholder="e.g. 2027 RBB Level 5 Banking Subjective Question"
               required
-              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-bold">Exam / Paper Year</label>
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Exam Year</label>
             <input
               type="number"
               value={subYear}
               onChange={e => setSubYear(parseInt(e.target.value) || 2027)}
-              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-bold">Question Document File (PDF/Image) *</label>
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Question Document File *</label>
             <input
               type="file"
               required
@@ -888,7 +1064,7 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-bold">Solution Document (Optional)</label>
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Solution Document (Optional)</label>
             <input
               type="file"
               onChange={e => setSubSolutionFile(e.target.files?.[0] || null)}

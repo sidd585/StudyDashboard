@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useUser } from '../context/UserContext';
-import { courseService, type CourseInput, type SubjectInput } from '../services/courseService';
+import { courseService } from '../services/courseService';
 import { extractSyllabusFromFile } from '../services/syllabusExtractor';
 import { type CloudCourse, type CloudSubject, type CloudTopic } from '../lib/supabase';
 import type { ExtractedTopicSection } from '../types';
@@ -21,7 +21,6 @@ import {
   ChevronDown,
   Clock,
   Sparkles,
-  Calendar,
   AlertCircle,
 } from 'lucide-react';
 
@@ -39,25 +38,26 @@ export const Courses: React.FC = () => {
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
+  const [isEditSubjectModalOpen, setIsEditSubjectModalOpen] = useState(false);
+  const [isEditTopicModalOpen, setIsEditTopicModalOpen] = useState(false);
   const [isSyllabusUploadModalOpen, setIsSyllabusUploadModalOpen] = useState(false);
   const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
 
-  // Course Form State
+  // Course Form State (Only Course Name & Daily Goal)
   const [courseName, setCourseName] = useState('');
-  const [courseDescription, setCourseDescription] = useState('');
-  const [courseYear, setCourseYear] = useState<number>(2027);
   const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(60);
-  const [courseColor, setCourseColor] = useState('#5b5bd6');
+  const [isSubmittingCourse, setIsSubmittingCourse] = useState(false);
+  const [courseError, setCourseError] = useState<string | null>(null);
 
   // Subject Form State
   const [subjectName, setSubjectName] = useState('');
-  const [subjectDescription, setSubjectDescription] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
+  const [editingSubject, setEditingSubject] = useState<CloudSubject | null>(null);
 
-  // Topic / Lesson Form State
+  // Topic Form State
   const [topicName, setTopicName] = useState('');
   const [topicCode, setTopicCode] = useState('');
-  const [parentTopicId, setParentTopicId] = useState<string | null>(null);
+  const [editingTopic, setEditingTopic] = useState<CloudTopic | null>(null);
 
   // Syllabus Extractor Upload & Confirmation State
   const [isExtracting, setIsExtracting] = useState(false);
@@ -66,17 +66,18 @@ export const Courses: React.FC = () => {
   const [syllabusFileName, setSyllabusFileName] = useState('');
   const [uploadStatusMsg, setUploadStatusMsg] = useState<string | null>(null);
 
-  // Expanded topic IDs for lesson tree
-  const [expandedTopicIds, setExpandedTopicIds] = useState<Record<string, boolean>>({});
-
   // 1. Fetch Courses
   const loadCourses = async () => {
     setLoading(true);
     try {
       const data = await courseService.getCourses();
       setCourses(data);
-      if (data.length > 0 && !selectedCourseId) {
-        setSelectedCourseId(data[0].id);
+      if (data.length > 0) {
+        if (!selectedCourseId || !data.some(c => c.id === selectedCourseId)) {
+          setSelectedCourseId(data[0].id);
+        }
+      } else {
+        setSelectedCourseId(null);
       }
     } catch (err) {
       console.error('Error fetching courses:', err);
@@ -100,7 +101,9 @@ export const Courses: React.FC = () => {
       const data = await courseService.getSubjects(selectedCourseId);
       setSubjects(data);
       if (data.length > 0) {
-        setSelectedSubjectId(data[0].id);
+        if (!selectedSubjectId || !data.some(s => s.id === selectedSubjectId)) {
+          setSelectedSubjectId(data[0].id);
+        }
       } else {
         setSelectedSubjectId(null);
       }
@@ -113,7 +116,7 @@ export const Courses: React.FC = () => {
     loadSubjects();
   }, [selectedCourseId]);
 
-  // 3. Fetch Topics when course/subject changes
+  // 3. Fetch Topics when course or subject changes
   const loadTopics = async () => {
     if (!selectedCourseId) {
       setTopics([]);
@@ -122,10 +125,6 @@ export const Courses: React.FC = () => {
     try {
       const data = await courseService.getTopics(selectedCourseId, selectedSubjectId || undefined);
       setTopics(data);
-      // Auto-expand all top-level topics
-      const expanded: Record<string, boolean> = {};
-      data.filter(t => !t.parent_topic_id).forEach(t => { expanded[t.id] = true; });
-      setExpandedTopicIds(expanded);
     } catch (err) {
       console.error('Error loading topics:', err);
     }
@@ -138,28 +137,34 @@ export const Courses: React.FC = () => {
   const activeCourse = courses.find(c => c.id === selectedCourseId);
   const activeSubject = subjects.find(s => s.id === selectedSubjectId);
 
-  const topLevelTopics = topics.filter(t => !t.parent_topic_id);
-  const getChildLessons = (parentTopicId: string) => topics.filter(t => t.parent_topic_id === parentTopicId);
-
-  // Handle Save Course
+  // Handle Save Course (Only Course Name & Minimum Daily Study Time)
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseName.trim()) return;
 
-    const newCourse = await courseService.createCourse({
-      name: courseName.trim(),
-      description: courseDescription.trim(),
-      year: courseYear,
-      dailyGoalMinutes,
-      color: courseColor,
-    });
+    setIsSubmittingCourse(true);
+    setCourseError(null);
 
-    if (newCourse) {
-      setCourses(prev => [...prev, newCourse]);
-      setSelectedCourseId(newCourse.id);
-      setIsCourseModalOpen(false);
-      setCourseName('');
-      setCourseDescription('');
+    try {
+      const newCourse = await courseService.createCourse({
+        name: courseName.trim(),
+        dailyGoalMinutes: dailyGoalMinutes || 60,
+      });
+
+      if (newCourse) {
+        setCourses(prev => [...prev, newCourse]);
+        setSelectedCourseId(newCourse.id);
+        setIsCourseModalOpen(false);
+        setCourseName('');
+        setDailyGoalMinutes(60);
+      } else {
+        setCourseError('Could not save course. Please check your connection and try again.');
+      }
+    } catch (err: any) {
+      console.error('Error in handleSaveCourse:', err);
+      setCourseError(err.message || 'Failed to create course');
+    } finally {
+      setIsSubmittingCourse(false);
     }
   };
 
@@ -168,50 +173,93 @@ export const Courses: React.FC = () => {
     e.preventDefault();
     if (!selectedCourseId || !subjectName.trim()) return;
 
-    const newSub = await courseService.createSubject({
-      courseId: selectedCourseId,
+    try {
+      const newSub = await courseService.createSubject({
+        courseId: selectedCourseId,
+        name: subjectName.trim(),
+        code: subjectCode.trim() || undefined,
+        sortOrder: subjects.length + 1,
+      });
+
+      if (newSub) {
+        setSubjects(prev => [...prev, newSub]);
+        setSelectedSubjectId(newSub.id);
+        setIsSubjectModalOpen(false);
+        setSubjectName('');
+        setSubjectCode('');
+      }
+    } catch (err) {
+      console.error('Error saving subject:', err);
+    }
+  };
+
+  // Handle Update Subject
+  const handleUpdateSubject = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSubject || !subjectName.trim()) return;
+
+    const success = await courseService.updateSubject(editingSubject.id, {
       name: subjectName.trim(),
-      description: subjectDescription.trim(),
-      code: subjectCode.trim(),
-      sortOrder: subjects.length + 1,
+      code: subjectCode.trim() || undefined,
     });
 
-    if (newSub) {
-      setSubjects(prev => [...prev, newSub]);
-      setSelectedSubjectId(newSub.id);
-      setIsSubjectModalOpen(false);
+    if (success) {
+      setSubjects(prev => prev.map(s => s.id === editingSubject.id ? { ...s, name: subjectName.trim(), code: subjectCode.trim() || undefined } : s));
+      setIsEditSubjectModalOpen(false);
+      setEditingSubject(null);
       setSubjectName('');
-      setSubjectDescription('');
       setSubjectCode('');
     }
   };
 
-  // Handle Save Topic or Lesson
+  // Handle Save Topic
   const handleSaveTopic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourseId || !topicName.trim()) return;
 
-    const newTopic = await courseService.createTopic(
-      selectedCourseId,
-      topicName.trim(),
-      selectedSubjectId || null,
-      parentTopicId || null,
-      topicCode.trim() || undefined,
-      topics.length + 1
-    );
+    try {
+      const newTopic = await courseService.createTopic(
+        selectedCourseId,
+        topicName.trim(),
+        selectedSubjectId || null,
+        null,
+        topicCode.trim() || undefined,
+        topics.length + 1
+      );
 
-    if (newTopic) {
-      setTopics(prev => [...prev, newTopic]);
-      setIsTopicModalOpen(false);
+      if (newTopic) {
+        setTopics(prev => [...prev, newTopic]);
+        setIsTopicModalOpen(false);
+        setTopicName('');
+        setTopicCode('');
+      }
+    } catch (err) {
+      console.error('Error creating topic:', err);
+    }
+  };
+
+  // Handle Update Topic
+  const handleUpdateTopic = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingTopic || !topicName.trim()) return;
+
+    const success = await courseService.updateTopic(editingTopic.id, {
+      name: topicName.trim(),
+      code: topicCode.trim() || undefined,
+    });
+
+    if (success) {
+      setTopics(prev => prev.map(t => t.id === editingTopic.id ? { ...t, name: topicName.trim(), code: topicCode.trim() || undefined } : t));
+      setIsEditTopicModalOpen(false);
+      setEditingTopic(null);
       setTopicName('');
       setTopicCode('');
-      setParentTopicId(null);
     }
   };
 
   // Handle Delete Course
   const handleDeleteCourse = async (courseId: string) => {
-    if (!window.confirm('Are you sure you want to delete this course and all its topics/lessons?')) return;
+    if (!window.confirm('Are you sure you want to delete this course and all its subjects and topics?')) return;
     const success = await courseService.deleteCourse(courseId);
     if (success) {
       const remaining = courses.filter(c => c.id !== courseId);
@@ -220,21 +268,34 @@ export const Courses: React.FC = () => {
     }
   };
 
-  // Handle Delete Topic
-  const handleDeleteTopic = async (topicId: string) => {
-    const success = await courseService.deleteTopic(topicId);
+  // Handle Delete Subject
+  const handleDeleteSubject = async (subjectId: string) => {
+    if (!window.confirm('Are you sure you want to delete this subject and its topics?')) return;
+    const success = await courseService.deleteSubject(subjectId);
     if (success) {
-      setTopics(prev => prev.filter(t => t.id !== topicId && t.parent_topic_id !== topicId));
+      const remaining = subjects.filter(s => s.id !== subjectId);
+      setSubjects(remaining);
+      setSelectedSubjectId(remaining.length > 0 ? remaining[0].id : null);
+      loadTopics();
     }
   };
 
-  // Handle File Upload for Syllabus Extractor
+  // Handle Delete Topic
+  const handleDeleteTopic = async (topicId: string) => {
+    if (!window.confirm('Are you sure you want to delete this topic?')) return;
+    const success = await courseService.deleteTopic(topicId);
+    if (success) {
+      setTopics(prev => prev.filter(t => t.id !== topicId));
+    }
+  };
+
+  // Handle File Upload for Syllabus Extractor (Optional helper)
   const handleSyllabusFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsExtracting(true);
-    setUploadStatusMsg('Reading and extracting topics and lessons from syllabus...');
+    setUploadStatusMsg('Reading and extracting topics from syllabus...');
 
     try {
       const result = await extractSyllabusFromFile(file);
@@ -248,18 +309,17 @@ export const Courses: React.FC = () => {
       setIsConfirmationModalOpen(true);
     } catch (err) {
       console.error('Error extracting syllabus:', err);
-      alert('Failed to parse syllabus file. Please verify it is a valid text or PDF document.');
+      alert('Failed to extract syllabus. You can still add topics manually.');
     } finally {
       setIsExtracting(false);
       setUploadStatusMsg(null);
     }
   };
 
-  // Confirm Extracted Syllabus and Save to Supabase
+  // Confirm Extracted Hierarchy Save
   const handleConfirmSyllabusSave = async () => {
     if (!selectedCourseId || extractedSections.length === 0) return;
 
-    setIsExtracting(true);
     try {
       await courseService.saveSyllabusHierarchy(
         selectedCourseId,
@@ -268,226 +328,262 @@ export const Courses: React.FC = () => {
         syllabusFileName
       );
       setIsConfirmationModalOpen(false);
-      setExtractedSections([]);
-      setExtractedStats(null);
-      await loadTopics();
+      loadTopics();
     } catch (err) {
-      console.error('Failed to save extracted syllabus hierarchy:', err);
-      alert('Error saving syllabus topics to cloud.');
-    } finally {
-      setIsExtracting(false);
+      console.error('Error saving extracted syllabus:', err);
+      alert('Error saving syllabus topics.');
     }
   };
 
-  const toggleTopicExpand = (topicId: string) => {
-    setExpandedTopicIds(prev => ({
-      ...prev,
-      [topicId]: !prev[topicId],
-    }));
-  };
-
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
-      {/* Header & Add Course Button */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#101828] dark:text-[#f8f9fc] transition-colors">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
+          <h1 className="text-xl font-extrabold text-[#101828] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-[#5b5bd6]" />
-            <span>My Courses</span>
+            <span>My Courses & Study Structure</span>
           </h1>
           <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
-            Manage your courses, academic years, papers, syllabus topics, and lesson hierarchy.
+            Organize your learning path: Course → Subject → Topics.
           </p>
         </div>
 
         <Button
           variant="primary"
           size="sm"
-          className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold self-start sm:self-auto shadow-xs"
+          className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold shadow-xs self-start sm:self-auto"
           leftIcon={<Plus className="w-4 h-4" />}
-          onClick={() => setIsCourseModalOpen(true)}
+          onClick={() => {
+            setCourseName('');
+            setDailyGoalMinutes(60);
+            setCourseError(null);
+            setIsCourseModalOpen(true);
+          }}
         >
-          + Add Course
+          + Create Course
         </Button>
       </div>
 
-      {/* Main Layout Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Course List (4 cols) */}
-        <div className="lg:col-span-4 space-y-3">
-          <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-            Your Courses ({courses.length})
-          </h2>
+      {/* Main Course Workspace Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Side: Course Selection List (4 cols) */}
+        <div className="lg:col-span-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
+              Your Courses ({courses.length})
+            </h2>
+          </div>
 
-          {courses.length > 0 ? (
-            <div className="space-y-2.5">
-              {courses.map(c => {
-                const isSelected = c.id === selectedCourseId;
+          <div className="space-y-2">
+            {courses.length > 0 ? (
+              courses.map(course => {
+                const isSelected = course.id === selectedCourseId;
                 return (
                   <div
-                    key={c.id}
-                    onClick={() => setSelectedCourseId(c.id)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer shadow-xs ${
+                    key={course.id}
+                    onClick={() => setSelectedCourseId(course.id)}
+                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
                       isSelected
-                        ? 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6]/40 shadow-indigo-500/5'
-                        : 'bg-[#fbfcfe] dark:bg-[#141824] border-[#e2e8f0] dark:border-[#23293d] hover:border-[#cbd5e1]'
+                        ? 'bg-white dark:bg-[#181d2f] border-[#5b5bd6] shadow-sm'
+                        : 'bg-white/80 dark:bg-[#141824] border-[#e2e8f0] dark:border-[#23293d] hover:border-[#94a3b8] dark:hover:border-[#334155]'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <span
-                          className="w-3 h-3 rounded-full shrink-0"
-                          style={{ backgroundColor: c.color || '#5b5bd6' }}
-                        />
-                        <div>
-                          <h3 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc] leading-tight">
-                            {c.name}
-                          </h3>
-                          {c.year && (
-                            <span className="inline-block text-[10px] font-bold text-[#5b5bd6] dark:text-[#8282ea] mt-0.5">
-                              Exam Year: {c.year}
-                            </span>
-                          )}
-                        </div>
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: course.color || '#5b5bd6' }}
+                      />
+                      <div>
+                        <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">
+                          {course.name}
+                        </h3>
+                        <p className="text-xs text-[#64748b] dark:text-[#9496a8] flex items-center gap-1.5 mt-0.5">
+                          <Clock className="w-3 h-3 text-[#5b5bd6]" />
+                          <span>Target: {course.daily_goal_minutes || 60}m / day</span>
+                        </p>
                       </div>
+                    </div>
 
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDeleteCourse(c.id);
+                          handleDeleteCourse(course.id);
                         }}
-                        className="text-[#94a3b8] hover:text-rose-600 p-1 transition-colors"
+                        className="p-1.5 text-[#94a3b8] hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors"
                         title="Delete Course"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </div>
-
-                    <div className="flex items-center gap-3 mt-3 pt-2.5 border-t border-[#e2e8f0]/60 dark:border-[#23293d]/60 text-[11px] text-[#64748b]">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-[#5b5bd6]" />
-                        <span>Goal: {c.daily_goal_minutes}m/day</span>
-                      </span>
+                      <ChevronRight
+                        className={`w-4 h-4 transition-transform ${
+                          isSelected ? 'text-[#5b5bd6] translate-x-0.5' : 'text-[#94a3b8]'
+                        }`}
+                      />
                     </div>
                   </div>
                 );
-              })}
-            </div>
-          ) : (
-            <Card className="p-6 text-center text-xs text-[#64748b] border-[#e2e8f0] dark:border-[#23293d]">
-              <p>No courses found.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3 text-xs font-bold bg-white dark:bg-[#181d2f] text-[#5b5bd6]"
-                onClick={() => setIsCourseModalOpen(true)}
-              >
-                + Create Course
-              </Button>
-            </Card>
-          )}
+              })
+            ) : (
+              <Card className="p-6 text-center text-xs text-[#64748b] dark:text-[#9496a8] space-y-3">
+                <p>No courses created yet.</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="bg-white dark:bg-[#181d2f] text-[#5b5bd6] border-[#e2e8f0] dark:border-[#2b334d] font-bold"
+                  leftIcon={<Plus className="w-3.5 h-3.5" />}
+                  onClick={() => setIsCourseModalOpen(true)}
+                >
+                  Create First Course
+                </Button>
+              </Card>
+            )}
+          </div>
         </div>
 
-        {/* Right Column: Course Hierarchy, Subjects, Syllabus & Topics (8 cols) */}
-        <div className="lg:col-span-8 space-y-5">
+        {/* Right Side: Subjects & Topics Manager (8 cols) */}
+        <div className="lg:col-span-8 space-y-6">
           {activeCourse ? (
-            <div className="space-y-5">
-              {/* Course Detail Card */}
-              <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[#e2e8f0] dark:border-[#23293d]">
-                  <div>
-                    <div className="flex items-center gap-2.5">
-                      <h2 className="text-lg font-extrabold text-[#172033] dark:text-[#f8f9fc]">
-                        {activeCourse.name}
-                      </h2>
-                      {activeCourse.year && (
-                        <Badge variant="brand" size="sm">
-                          Year {activeCourse.year}
-                        </Badge>
-                      )}
-                    </div>
-                    {activeCourse.description && (
-                      <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-1">
-                        {activeCourse.description}
-                      </p>
-                    )}
-                  </div>
-
+            <div className="space-y-6">
+              {/* Course Detail Card Header */}
+              <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="bg-white dark:bg-[#181d2f] text-xs font-bold border-[#e2e8f0] dark:border-[#2b334d] text-[#0284c7]"
-                      leftIcon={<Upload className="w-3.5 h-3.5" />}
-                      onClick={() => setIsSyllabusUploadModalOpen(true)}
-                    >
-                      Upload Syllabus
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="bg-white dark:bg-[#181d2f] text-xs font-bold border-[#e2e8f0] dark:border-[#2b334d] text-[#5b5bd6]"
-                      leftIcon={<Plus className="w-3.5 h-3.5" />}
-                      onClick={() => setIsSubjectModalOpen(true)}
-                    >
-                      + Add Subject / Paper
-                    </Button>
+                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: activeCourse.color || '#5b5bd6' }} />
+                    <h2 className="text-lg font-bold text-[#101828] dark:text-[#f8f9fc]">
+                      {activeCourse.name}
+                    </h2>
                   </div>
+                  <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-1 flex items-center gap-2">
+                    <span>Minimum Daily Goal: <strong className="text-[#5b5bd6] dark:text-[#8282ea]">{activeCourse.daily_goal_minutes || 60} mins</strong></span>
+                    <span>•</span>
+                    <span>{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'}</span>
+                    <span>•</span>
+                    <span>{topics.length} {topics.length === 1 ? 'Topic' : 'Topics'}</span>
+                  </p>
                 </div>
 
-                {/* Subjects Tabs */}
-                {subjects.length > 0 && (
-                  <div className="pt-4 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] mr-1">
-                      Papers:
-                    </span>
-                    <button
-                      onClick={() => setSelectedSubjectId(null)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                        selectedSubjectId === null
-                          ? 'bg-[#5b5bd6] text-white shadow-xs'
-                          : 'bg-[#eef2f6] dark:bg-[#1f2538] text-[#64748b] hover:text-[#172033] dark:hover:text-white'
-                      }`}
-                    >
-                      All Papers
-                    </button>
-                    {subjects.map(sub => (
-                      <button
-                        key={sub.id}
-                        onClick={() => setSelectedSubjectId(sub.id)}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
-                          selectedSubjectId === sub.id
-                            ? 'bg-[#5b5bd6] text-white shadow-xs'
-                            : 'bg-[#eef2f6] dark:bg-[#1f2538] text-[#64748b] hover:text-[#172033] dark:hover:text-white'
-                        }`}
-                      >
-                        {sub.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs font-bold bg-white dark:bg-[#181d2f] text-[#5b5bd6] border-[#e2e8f0] dark:border-[#2b334d]"
+                    leftIcon={<Plus className="w-3.5 h-3.5" />}
+                    onClick={() => {
+                      setSubjectName('');
+                      setSubjectCode('');
+                      setIsSubjectModalOpen(true);
+                    }}
+                  >
+                    + Add Subject
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs text-[#64748b] bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#2b334d]"
+                    leftIcon={<Upload className="w-3.5 h-3.5" />}
+                    onClick={() => setIsSyllabusUploadModalOpen(true)}
+                    title="Upload syllabus PDF to extract topics automatically"
+                  >
+                    Upload Syllabus
+                  </Button>
+                </div>
               </Card>
 
-              {/* Topics & Lessons Tree */}
-              <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+              {/* 1. Subjects Tabs */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
+                    Subjects / Papers ({subjects.length})
+                  </h3>
+                </div>
+
+                {subjects.length > 0 ? (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {subjects.map(s => {
+                      const isSelected = s.id === selectedSubjectId;
+                      return (
+                        <div
+                          key={s.id}
+                          onClick={() => setSelectedSubjectId(s.id)}
+                          className={`group px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 border ${
+                            isSelected
+                              ? 'bg-[#5b5bd6] text-white border-[#5b5bd6] shadow-xs'
+                              : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#2b334d] text-[#334155] dark:text-[#cbd5e1] hover:border-[#5b5bd6]'
+                          }`}
+                        >
+                          <span>{s.name} {s.code ? `(${s.code})` : ''}</span>
+
+                          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingSubject(s);
+                                setSubjectName(s.name);
+                                setSubjectCode(s.code || '');
+                                setIsEditSubjectModalOpen(true);
+                              }}
+                              className="p-0.5 hover:text-white"
+                              title="Edit Subject"
+                            >
+                              <Edit2 className="w-3 h-3" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSubject(s.id);
+                              }}
+                              className="p-0.5 hover:text-rose-300"
+                              title="Delete Subject"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl border border-dashed border-[#e2e8f0] dark:border-[#2b334d] text-center text-xs text-[#64748b]">
+                    <p>No subjects added under this course yet.</p>
+                    <button
+                      onClick={() => {
+                        setSubjectName('');
+                        setSubjectCode('');
+                        setIsSubjectModalOpen(true);
+                      }}
+                      className="mt-1 font-bold text-[#5b5bd6] dark:text-[#8282ea] hover:underline"
+                    >
+                      + Add Subject (e.g. Mathematics, Banking, IT)
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Topics inside Subject */}
+              <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc] flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc] flex items-center gap-2">
                       <Layers className="w-4 h-4 text-[#5b5bd6]" />
-                      <span>Syllabus Topics & Lessons ({topLevelTopics.length} Topics)</span>
+                      <span>
+                        Topics {activeSubject ? `in ${activeSubject.name}` : ''} ({topics.length})
+                      </span>
                     </h3>
-                    <p className="text-[11px] text-[#64748b] dark:text-[#9496a8]">
-                      Organized units and lessons for practice questions and planner sessions
+                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                      Topics and chapters to study and practice questions for
                     </p>
                   </div>
 
                   <Button
-                    variant="outline"
+                    variant="primary"
                     size="sm"
-                    className="bg-white dark:bg-[#181d2f] text-xs font-bold border-[#e2e8f0] dark:border-[#2b334d]"
-                    leftIcon={<Plus className="w-3 h-3" />}
+                    className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white text-xs font-bold"
+                    leftIcon={<Plus className="w-3.5 h-3.5" />}
                     onClick={() => {
-                      setParentTopicId(null);
+                      setTopicName('');
+                      setTopicCode('');
                       setIsTopicModalOpen(true);
                     }}
                   >
@@ -495,108 +591,67 @@ export const Courses: React.FC = () => {
                   </Button>
                 </div>
 
-                {topLevelTopics.length > 0 ? (
-                  <div className="space-y-3 pt-1">
-                    {topLevelTopics.map((top, idx) => {
-                      const childLessons = getChildLessons(top.id);
-                      const isExpanded = expandedTopicIds[top.id] !== false;
-                      return (
-                        <div
-                          key={top.id}
-                          className="rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#181d2f] overflow-hidden shadow-xs"
-                        >
-                          {/* Top Level Topic Header */}
-                          <div
-                            onClick={() => toggleTopicExpand(top.id)}
-                            className="p-3.5 flex items-center justify-between cursor-pointer hover:bg-[#f8fafc] dark:hover:bg-[#141824]/60 transition-colors"
-                          >
-                            <div className="flex items-center gap-3">
-                              <span className="w-6 h-6 rounded-lg bg-[#5b5bd6]/10 text-[#5b5bd6] dark:text-[#8282ea] font-extrabold text-xs flex items-center justify-center">
-                                {top.code || idx + 1}
-                              </span>
-                              <div>
-                                <h4 className="font-bold text-xs sm:text-sm text-[#172033] dark:text-[#f8f9fc]">
-                                  {top.name}
-                                </h4>
-                                <span className="text-[11px] text-[#64748b]">
-                                  {childLessons.length} {childLessons.length === 1 ? 'Lesson' : 'Lessons'}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setParentTopicId(top.id);
-                                  setIsTopicModalOpen(true);
-                                }}
-                                className="text-xs font-semibold text-[#5b5bd6] dark:text-[#8282ea] hover:underline p-1"
-                                title="Add subtopic/lesson"
-                              >
-                                + Add Lesson
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteTopic(top.id);
-                                }}
-                                className="text-[#94a3b8] hover:text-rose-600 p-1"
-                                title="Delete Topic"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                              {isExpanded ? (
-                                <ChevronDown className="w-4 h-4 text-[#64748b]" />
-                              ) : (
-                                <ChevronRight className="w-4 h-4 text-[#64748b]" />
-                              )}
-                            </div>
+                {topics.length > 0 ? (
+                  <div className="space-y-2 pt-2">
+                    {topics.map((t, idx) => (
+                      <div
+                        key={t.id}
+                        className="p-3.5 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-[#f8fafc] dark:bg-[#181d2f] flex items-center justify-between hover:border-[#5b5bd6]/40 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="w-6 h-6 rounded-lg bg-[#5b5bd6]/10 text-[#5b5bd6] dark:text-[#8282ea] font-extrabold text-xs flex items-center justify-center">
+                            {t.code || idx + 1}
+                          </span>
+                          <div>
+                            <h4 className="font-bold text-xs sm:text-sm text-[#101828] dark:text-[#f8f9fc]">
+                              {t.name}
+                            </h4>
                           </div>
-
-                          {/* Nested Subtopic Lessons */}
-                          {isExpanded && childLessons.length > 0 && (
-                            <div className="border-t border-[#e2e8f0] dark:border-[#23293d] bg-[#f8fafc] dark:bg-[#141824]/40 px-4 py-2 space-y-1.5">
-                              {childLessons.map((lesson) => (
-                                <div
-                                  key={lesson.id}
-                                  className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-white dark:hover:bg-[#181d2f] text-xs transition-colors"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[11px] font-mono font-bold text-[#5b5bd6]">
-                                      {lesson.code || '•'}
-                                    </span>
-                                    <span className="text-[#334155] dark:text-[#cbd5e1] font-medium">
-                                      {lesson.name}
-                                    </span>
-                                  </div>
-                                  <button
-                                    onClick={() => handleDeleteTopic(lesson.id)}
-                                    className="text-[#94a3b8] hover:text-rose-600 p-1"
-                                    title="Delete Lesson"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
                         </div>
-                      );
-                    })}
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingTopic(t);
+                              setTopicName(t.name);
+                              setTopicCode(t.code || '');
+                              setIsEditTopicModalOpen(true);
+                            }}
+                            className="p-1 text-[#94a3b8] hover:text-[#5b5bd6] transition-colors"
+                            title="Edit Topic"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTopic(t.id)}
+                            className="p-1 text-[#94a3b8] hover:text-rose-600 transition-colors"
+                            title="Delete Topic"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 ) : (
                   <div className="py-8 text-center text-xs text-[#64748b] border border-dashed border-[#e2e8f0] dark:border-[#23293d] rounded-xl space-y-2">
-                    <p>No syllabus topics extracted or added for this course yet.</p>
-                    <div className="flex items-center justify-center gap-3 pt-1">
+                    <p>No topics added for this subject yet.</p>
+                    <p className="text-[11px] text-[#94a3b8]">
+                      Add topics like <em>Simple Interest, Compound Interest, Percentage, Profit and Loss</em>.
+                    </p>
+                    <div className="pt-2">
                       <Button
-                        variant="primary"
+                        variant="outline"
                         size="sm"
-                        className="bg-[#5b5bd6] text-white text-xs font-bold"
-                        leftIcon={<Upload className="w-3.5 h-3.5" />}
-                        onClick={() => setIsSyllabusUploadModalOpen(true)}
+                        className="bg-white dark:bg-[#181d2f] text-[#5b5bd6] font-bold text-xs"
+                        leftIcon={<Plus className="w-3.5 h-3.5" />}
+                        onClick={() => {
+                          setTopicName('');
+                          setTopicCode('');
+                          setIsTopicModalOpen(true);
+                        }}
                       >
-                        Upload Syllabus PDF
+                        + Add First Topic
                       </Button>
                     </div>
                   </div>
@@ -604,21 +659,30 @@ export const Courses: React.FC = () => {
               </Card>
             </div>
           ) : (
-            <Card className="p-8 text-center text-xs text-[#64748b]">
-              <p>Select or create a course from the left menu to view subjects and syllabus.</p>
+            <Card className="p-12 text-center text-xs text-[#64748b] dark:text-[#9496a8] space-y-2">
+              <BookOpen className="w-8 h-8 mx-auto text-[#94a3b8] opacity-50" />
+              <p className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">Select or create a course</p>
+              <p>Choose a course on the left or click <strong>+ Create Course</strong> above.</p>
             </Card>
           )}
         </div>
       </div>
 
-      {/* ================= MODAL 1: ADD COURSE ================= */}
+      {/* ================= MODAL 1: ADD COURSE (SIMPLIFIED) ================= */}
       <Modal
         isOpen={isCourseModalOpen}
         onClose={() => setIsCourseModalOpen(false)}
         title="Add New Course"
-        size="md"
+        size="sm"
       >
-        <form onSubmit={handleSaveCourse} className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+        <form onSubmit={handleSaveCourse} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {courseError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{courseError}</span>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
               Course Name *
@@ -627,52 +691,34 @@ export const Courses: React.FC = () => {
               type="text"
               value={courseName}
               onChange={e => setCourseName(e.target.value)}
-              placeholder="e.g. RBB Level 5 IT, NRB Assistant, AI Course, College"
+              placeholder="e.g. RBB Preparation, NRB Assistant, AI Course"
               required
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              autoFocus
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                Academic / Exam Year
-              </label>
-              <input
-                type="number"
-                value={courseYear}
-                onChange={e => setCourseYear(parseInt(e.target.value) || 2027)}
-                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                Daily Study Goal (Minutes)
-              </label>
-              <input
-                type="number"
-                value={dailyGoalMinutes}
-                onChange={e => setDailyGoalMinutes(parseInt(e.target.value) || 60)}
-                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
-              />
-            </div>
           </div>
 
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-              Description (Optional)
+              Minimum Daily Study Time (Minutes) *
             </label>
-            <textarea
-              value={courseDescription}
-              onChange={e => setCourseDescription(e.target.value)}
-              placeholder="Syllabus coverage notes or target exam details"
-              className="w-full h-16 px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6] resize-none"
+            <input
+              type="number"
+              min={10}
+              max={720}
+              value={dailyGoalMinutes}
+              onChange={e => setDailyGoalMinutes(parseInt(e.target.value) || 60)}
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
+            <p className="text-[11px] text-[#64748b] dark:text-[#9496a8]">
+              e.g. 60 minutes target per day for this course
+            </p>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-3">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsCourseModalOpen(false)}
@@ -683,33 +729,35 @@ export const Courses: React.FC = () => {
               type="submit"
               variant="primary"
               size="sm"
+              disabled={isSubmittingCourse || !courseName.trim()}
               className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
             >
-              Create Course
+              {isSubmittingCourse ? 'Creating...' : 'Create Course'}
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* ================= MODAL 2: ADD SUBJECT / PAPER ================= */}
+      {/* ================= MODAL 2: ADD SUBJECT ================= */}
       <Modal
         isOpen={isSubjectModalOpen}
         onClose={() => setIsSubjectModalOpen(false)}
-        title="Add Subject / Paper"
-        size="md"
+        title={`Add Subject to ${activeCourse?.name || 'Course'}`}
+        size="sm"
       >
-        <form onSubmit={handleSaveSubject} className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+        <form onSubmit={handleSaveSubject} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-              Subject / Paper Name *
+              Subject Name *
             </label>
             <input
               type="text"
               value={subjectName}
               onChange={e => setSubjectName(e.target.value)}
-              placeholder="e.g. Paper I — Banking & Management, Database Systems"
+              placeholder="e.g. Mathematics, General Knowledge, Banking"
               required
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              autoFocus
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
@@ -721,13 +769,14 @@ export const Courses: React.FC = () => {
               type="text"
               value={subjectCode}
               onChange={e => setSubjectCode(e.target.value)}
-              placeholder="e.g. PAPER-1, CS-401"
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              placeholder="e.g. MATH-101, PAPER-1"
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsSubjectModalOpen(false)}
@@ -738,6 +787,7 @@ export const Courses: React.FC = () => {
               type="submit"
               variant="primary"
               size="sm"
+              disabled={!subjectName.trim()}
               className="bg-[#5b5bd6] text-white font-bold"
             >
               Save Subject
@@ -746,43 +796,99 @@ export const Courses: React.FC = () => {
         </form>
       </Modal>
 
-      {/* ================= MODAL 3: ADD TOPIC / LESSON ================= */}
+      {/* ================= MODAL: EDIT SUBJECT ================= */}
       <Modal
-        isOpen={isTopicModalOpen}
-        onClose={() => setIsTopicModalOpen(false)}
-        title={parentTopicId ? 'Add Subtopic / Lesson' : 'Add Top-Level Topic'}
-        size="md"
+        isOpen={isEditSubjectModalOpen}
+        onClose={() => setIsEditSubjectModalOpen(false)}
+        title="Edit Subject"
+        size="sm"
       >
-        <form onSubmit={handleSaveTopic} className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+        <form onSubmit={handleUpdateSubject} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-              {parentTopicId ? 'Lesson Name *' : 'Topic Unit Name *'}
+              Subject Name *
             </label>
             <input
               type="text"
-              value={topicName}
-              onChange={e => setTopicName(e.target.value)}
-              placeholder={parentTopicId ? 'e.g. 3.1 Networking Devices' : 'e.g. 3. Computer Network Technologies'}
+              value={subjectName}
+              onChange={e => setSubjectName(e.target.value)}
               required
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-              Code / Unit Number (Optional)
+              Code (Optional)
             </label>
             <input
               type="text"
-              value={topicCode}
-              onChange={e => setTopicCode(e.target.value)}
-              placeholder={parentTopicId ? 'e.g. 3.1' : 'e.g. 3'}
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+              value={subjectCode}
+              onChange={e => setSubjectCode(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
           </div>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsEditSubjectModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              className="bg-[#5b5bd6] text-white font-bold"
+            >
+              Update Subject
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ================= MODAL 3: ADD TOPIC ================= */}
+      <Modal
+        isOpen={isTopicModalOpen}
+        onClose={() => setIsTopicModalOpen(false)}
+        title={`Add Topic ${activeSubject ? `to ${activeSubject.name}` : ''}`}
+        size="sm"
+      >
+        <form onSubmit={handleSaveTopic} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Topic Name *
+            </label>
+            <input
+              type="text"
+              value={topicName}
+              onChange={e => setTopicName(e.target.value)}
+              placeholder="e.g. Simple Interest, Compound Interest, Percentage"
+              required
+              autoFocus
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Topic Code / Number (Optional)
+            </label>
+            <input
+              type="text"
+              value={topicCode}
+              onChange={e => setTopicCode(e.target.value)}
+              placeholder="e.g. 1.1, Unit 1"
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => setIsTopicModalOpen(false)}
@@ -793,6 +899,7 @@ export const Courses: React.FC = () => {
               type="submit"
               variant="primary"
               size="sm"
+              disabled={!topicName.trim()}
               className="bg-[#5b5bd6] text-white font-bold"
             >
               Save Topic
@@ -801,103 +908,115 @@ export const Courses: React.FC = () => {
         </form>
       </Modal>
 
-      {/* ================= MODAL 4: SYLLABUS FILE UPLOAD ================= */}
+      {/* ================= MODAL: EDIT TOPIC ================= */}
+      <Modal
+        isOpen={isEditTopicModalOpen}
+        onClose={() => setIsEditTopicModalOpen(false)}
+        title="Edit Topic"
+        size="sm"
+      >
+        <form onSubmit={handleUpdateTopic} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Topic Name *
+            </label>
+            <input
+              type="text"
+              value={topicName}
+              onChange={e => setTopicName(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Topic Code (Optional)
+            </label>
+            <input
+              type="text"
+              value={topicCode}
+              onChange={e => setTopicCode(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsEditTopicModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              className="bg-[#5b5bd6] text-white font-bold"
+            >
+              Update Topic
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ================= MODAL: OPTIONAL SYLLABUS UPLOAD ================= */}
       <Modal
         isOpen={isSyllabusUploadModalOpen}
         onClose={() => setIsSyllabusUploadModalOpen(false)}
-        title="Upload Syllabus Document"
+        title="Upload Syllabus Document (Optional)"
         size="md"
       >
-        <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+        <div className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
           <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
-            Upload a syllabus PDF or document. The system will automatically detect the main units (e.g. 6 Topics) and nested numbered sections (Lessons) for confirmation.
+            Upload an official syllabus PDF or document. The parser will automatically extract chapters and topics for you.
           </p>
 
-          <div className="border-2 border-dashed border-[#cbd5e1] dark:border-[#2b334d] rounded-2xl p-8 text-center space-y-3 hover:border-[#5b5bd6] transition-colors">
-            <Upload className="w-8 h-8 text-[#5b5bd6] mx-auto animate-bounce" />
-            <div>
-              <p className="text-xs font-bold text-[#172033] dark:text-white">
-                Choose Syllabus PDF or Text File
-              </p>
-              <p className="text-[11px] text-[#64748b]">PDF, TXT up to 10MB</p>
-            </div>
+          <div className="border-2 border-dashed border-[#cbd5e1] dark:border-[#2b334d] rounded-2xl p-6 text-center space-y-2">
+            <Upload className="w-8 h-8 text-[#5b5bd6] mx-auto" />
+            <p className="text-xs font-bold">Select Syllabus PDF</p>
             <input
               type="file"
-              accept=".pdf,.txt"
+              accept=".pdf,.txt,.md"
               onChange={handleSyllabusFileUpload}
-              disabled={isExtracting}
-              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#5b5bd6]/10 file:text-[#5b5bd6] hover:file:bg-[#5b5bd6]/20 cursor-pointer"
+              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#5b5bd6]/10 file:text-[#5b5bd6] cursor-pointer"
             />
           </div>
 
           {isExtracting && (
-            <div className="p-3 bg-[#eef2f6] dark:bg-[#1f2538] rounded-xl text-center text-xs font-bold text-[#5b5bd6] animate-pulse">
-              {uploadStatusMsg || 'Extracting syllabus hierarchy...'}
+            <div className="p-3 bg-[#5b5bd6]/10 text-[#5b5bd6] rounded-xl text-xs font-bold animate-pulse text-center">
+              {uploadStatusMsg || 'Analyzing syllabus structure...'}
             </div>
           )}
         </div>
       </Modal>
 
-      {/* ================= MODAL 5: SYLLABUS CONFIRMATION DIALOG ================= */}
+      {/* ================= MODAL: CONFIRM SYLLABUS EXTRACTION ================= */}
       <Modal
         isOpen={isConfirmationModalOpen}
         onClose={() => setIsConfirmationModalOpen(false)}
-        title="Syllabus Extracted Successfully"
+        title="Confirm Extracted Syllabus Topics"
         size="lg"
       >
-        <div className="space-y-5 text-[#172033] dark:text-[#f8f9fc]">
-          <div className="p-4 bg-[#f4fbf7] dark:bg-[#122820] rounded-2xl border border-emerald-500/30 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-              <div>
-                <h3 className="text-sm font-bold text-[#172033] dark:text-white">
-                  {extractedStats?.totalTopics} Topics · {extractedStats?.totalLessons} Lessons Extracted
-                </h3>
-                <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
-                  Source file: {syllabusFileName}
-                </p>
-              </div>
-            </div>
-            <Badge variant="brand">Ready to Save</Badge>
+        <div className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
+            <span>✓ Extracted {extractedStats?.totalTopics || 0} topics from {syllabusFileName}</span>
           </div>
 
-          {/* Extracted Hierarchy Preview */}
-          <div className="max-h-72 overflow-y-auto space-y-2.5 pr-1 border border-[#e2e8f0] dark:border-[#23293d] rounded-xl p-3 bg-[#f8fafc] dark:bg-[#141824]/40">
+          <div className="max-h-64 overflow-y-auto space-y-2 p-2 border border-[#e2e8f0] dark:border-[#23293d] rounded-xl bg-[#f8fafc] dark:bg-[#181d2f]">
             {extractedSections.map((sec, i) => (
-              <div key={i} className="p-3 rounded-lg bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#23293d] space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-[#5b5bd6]">{sec.code || `${i + 1}`}.</span>
-                  <span className="text-xs font-bold text-[#172033] dark:text-[#f8f9fc]">{sec.name}</span>
-                </div>
-                {sec.lessons.length > 0 && (
-                  <div className="pl-5 space-y-0.5 pt-1">
-                    {sec.lessons.map((les, j) => (
-                      <p key={j} className="text-[11px] text-[#64748b]">
-                        <span className="font-mono font-bold text-[#5b5bd6] mr-1">{les.code}</span> {les.name}
-                      </p>
-                    ))}
-                  </div>
-                )}
+              <div key={i} className="text-xs p-2 bg-white dark:bg-[#141824] rounded-lg border border-[#e2e8f0] dark:border-[#23293d]">
+                <strong>{sec.code ? `${sec.code}. ` : ''}{sec.name}</strong>
               </div>
             ))}
           </div>
 
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsConfirmationModalOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
-              onClick={handleConfirmSyllabusSave}
-              disabled={isExtracting}
-            >
-              {isExtracting ? 'Saving to Cloud...' : 'Confirm & Save Hierarchy'}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setIsConfirmationModalOpen(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={handleConfirmSyllabusSave} className="bg-[#5b5bd6] text-white font-bold">
+              Save Topics to Course
             </Button>
           </div>
         </div>

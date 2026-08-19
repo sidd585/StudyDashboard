@@ -125,12 +125,14 @@ export const subjectiveService = {
   },
 
   // Delete subjective paper
-  async deleteSubjectivePaper(id: string, filePath: string): Promise<boolean> {
+  async deleteSubjectivePaper(id: string, filePath?: string): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
 
     try {
-      await supabase.storage.from('study-files').remove([filePath]);
+      if (filePath) {
+        await supabase.storage.from('study-files').remove([filePath]);
+      }
       const { error } = await supabase
         .from('subjective_papers')
         .delete()

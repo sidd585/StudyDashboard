@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = 'bright' | 'dim' | 'night' | 'light' | 'dark' | 'system';
+export type ActiveTheme = 'bright' | 'dim' | 'night';
 
 interface ThemeContextType {
-  theme: 'light' | 'dark';
+  theme: 'light' | 'dark'; // for backward compatibility with existing boolean switches
+  activeTheme: ActiveTheme;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
   toggleTheme: () => void;
@@ -14,31 +16,42 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem('studyos_theme_mode') as ThemeMode;
-    return saved || 'light';
+    if (saved === 'light' || saved === 'bright') return 'bright';
+    if (saved === 'dim') return 'dim';
+    if (saved === 'dark' || saved === 'night') return 'night';
+    if (saved === 'system') return 'system';
+    return 'bright';
   });
 
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
+  const [activeTheme, setActiveTheme] = useState<ActiveTheme>('bright');
 
   useEffect(() => {
     const updateTheme = () => {
-      let active: 'light' | 'dark' = 'light';
+      let resolved: ActiveTheme = 'bright';
       if (themeMode === 'system') {
         const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        active = prefersDark ? 'dark' : 'light';
-      } else {
-        active = themeMode;
+        resolved = prefersDark ? 'night' : 'bright';
+      } else if (themeMode === 'light' || themeMode === 'bright') {
+        resolved = 'bright';
+      } else if (themeMode === 'dim') {
+        resolved = 'dim';
+      } else if (themeMode === 'dark' || themeMode === 'night') {
+        resolved = 'night';
       }
 
-      setResolvedTheme(active);
+      setActiveTheme(resolved);
       const root = document.documentElement;
-      if (active === 'dark') {
-        root.classList.add('dark');
-        root.classList.remove('light');
-        root.setAttribute('data-theme', 'dark');
+      root.classList.remove('light', 'dark', 'theme-bright', 'theme-dim', 'theme-night');
+
+      if (resolved === 'bright') {
+        root.classList.add('light', 'theme-bright');
+        root.setAttribute('data-theme', 'bright');
+      } else if (resolved === 'dim') {
+        root.classList.add('dark', 'theme-dim');
+        root.setAttribute('data-theme', 'dim');
       } else {
-        root.classList.add('light');
-        root.classList.remove('dark');
-        root.setAttribute('data-theme', 'light');
+        root.classList.add('dark', 'theme-night');
+        root.setAttribute('data-theme', 'night');
       }
     };
 
@@ -58,11 +71,17 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const toggleTheme = () => {
-    setThemeModeState(prev => (prev === 'dark' ? 'light' : 'dark'));
+    setThemeModeState(prev => {
+      if (prev === 'bright' || prev === 'light') return 'dim';
+      if (prev === 'dim') return 'night';
+      return 'bright';
+    });
   };
 
+  const legacyTheme: 'light' | 'dark' = activeTheme === 'bright' ? 'light' : 'dark';
+
   return (
-    <ThemeContext.Provider value={{ theme: resolvedTheme, themeMode, setThemeMode, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme: legacyTheme, activeTheme, themeMode, setThemeMode, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

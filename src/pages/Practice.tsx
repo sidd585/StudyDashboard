@@ -1,8 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useUser } from '../context/UserContext';
 import { courseService } from '../services/courseService';
 import { questionService } from '../services/questionService';
-import { practiceService } from '../services/practiceService';
 import { type CloudCourse, type CloudSubject, type CloudTopic, type CloudQuestion } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -41,17 +40,17 @@ export const Practice: React.FC<PracticeProps> = ({
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [topics, setTopics] = useState<CloudTopic[]>([]);
 
-  // Step 3: Topic Selection Mode
+  // Topic Selection Mode
   const [topicSelectionMode, setTopicSelectionMode] = useState<'single' | 'multi' | 'all'>('all');
   const [selectedSingleTopicId, setSelectedSingleTopicId] = useState<string>(initialTopicId || '');
   const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([]);
 
-  // Step 4: Question Count & Custom
+  // Question Count & Custom
   const [questionCount, setQuestionCount] = useState<number>(initialQuestionCount || 15);
   const [isCustomCount, setIsCustomCount] = useState<boolean>(false);
   const [customCountInput, setCustomCountInput] = useState<string>('20');
 
-  // Step 5: Mode & Timer
+  // Mode & Timer
   const [examMode, setExamMode] = useState<'practice' | 'timed'>('practice');
   const [timerMinutes, setTimerMinutes] = useState<number>(30);
   const [isCustomTimer, setIsCustomTimer] = useState<boolean>(false);
@@ -96,11 +95,13 @@ export const Practice: React.FC<PracticeProps> = ({
         return;
       }
       const data = await courseService.getTopics(selectedCourseId, selectedSubjectId || undefined);
-      const topTopics = data.filter(t => !t.parent_topic_id);
-      setTopics(topTopics);
-      if (topTopics.length > 0) {
-        setSelectedSingleTopicId(topTopics[0].id);
-        setSelectedTopicIds(topTopics.map(t => t.id));
+      setTopics(data);
+      if (data.length > 0) {
+        setSelectedSingleTopicId(data[0].id);
+        setSelectedTopicIds(data.map(t => t.id));
+      } else {
+        setSelectedSingleTopicId('');
+        setSelectedTopicIds([]);
       }
     }
     loadTopics();
@@ -129,7 +130,7 @@ export const Practice: React.FC<PracticeProps> = ({
           filtered = questions.filter(q => q.topic_id && selectedTopicIds.includes(q.topic_id));
         }
 
-        // Strictly deduplicate by ID
+        // Strictly deduplicate by ID (no repeated questions)
         const seen = new Set<string>();
         const unique = filtered.filter(q => {
           if (seen.has(q.id)) return false;
@@ -153,14 +154,6 @@ export const Practice: React.FC<PracticeProps> = ({
     );
   };
 
-  const handleSelectAllTopics = () => {
-    setSelectedTopicIds(topics.map(t => t.id));
-  };
-
-  const handleClearAllTopics = () => {
-    setSelectedTopicIds([]);
-  };
-
   const finalQuestionCount = isCustomCount
     ? Math.max(1, parseInt(customCountInput) || 10)
     : questionCount;
@@ -175,7 +168,7 @@ export const Practice: React.FC<PracticeProps> = ({
       return;
     }
 
-    // Step 1: Shuffle questions deterministically ONCE
+    // Step 1: Shuffle questions deterministically ONCE (strictly deduplicated)
     const shuffled = [...availableQuestions].sort(() => 0.5 - Math.random());
 
     // Step 2: Slice exact required count
@@ -186,15 +179,15 @@ export const Practice: React.FC<PracticeProps> = ({
 
     const config: QuizConfig = {
       mode: isTest ? 'exam' : 'practice',
-      title: `${courseObj?.name || 'MCQ'} ${isTest ? 'Timed Exam' : 'Practice'} (${selected.length} Qs)`,
+      title: `${courseObj?.name || 'MCQ'} ${isTest ? 'Timed Test' : 'Practice'} (${selected.length} Questions)`,
       courseId: selectedCourseId,
       subjectId: selectedSubjectId || undefined,
       topicIds: topicSelectionMode === 'single' ? [selectedSingleTopicId] : selectedTopicIds,
       questionCount: selected.length,
       durationMinutes: isTest ? finalDurationMinutes : undefined,
       marksPerCorrect: 1,
-      negativeMarks: 0.2,
-      shuffleQuestions: false, // already shuffled once
+      negativeMarks: 0.25,
+      shuffleQuestions: false,
       shuffleOptions: false,
       immediateFeedback: !isTest,
     };
@@ -203,359 +196,251 @@ export const Practice: React.FC<PracticeProps> = ({
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+    <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-fade-in text-[#101828] dark:text-[#f8f9fc] transition-colors">
       {/* Header */}
       <div>
-        <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
+        <h1 className="text-xl font-extrabold text-[#101828] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
           <BookOpen className="w-5 h-5 text-[#5b5bd6]" />
-          <span>MCQ Practice & Exam Setup</span>
+          <span>MCQ Practice & Timed Test Setup</span>
         </h1>
         <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
-          Configure targeted practice sessions or timed simulated exams with instant scoring.
+          Select your Course, Subject, and Topics to launch an interactive practice or timed exam session.
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Main Setup Form (8 cols) */}
         <div className="lg:col-span-8 space-y-5">
-          {/* STEP 1: Course & STEP 2: Subject */}
-          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
-            <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-              1. Target Course & Subject
-            </h2>
+          {/* STEP 1: COURSE & SUBJECT */}
+          <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6] text-xs font-bold flex items-center justify-center">1</span>
+              <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Select Course & Subject</h2>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                  Select Course *
-                </label>
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Course *</label>
                 <select
                   value={selectedCourseId}
                   onChange={e => setSelectedCourseId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
                 >
                   {courses.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {c.year ? `(${c.year})` : ''}
-                    </option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </div>
 
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                  Select Subject / Paper
-                </label>
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Subject</label>
                 <select
                   value={selectedSubjectId}
                   onChange={e => setSelectedSubjectId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
                 >
                   <option value="">All Subjects</option>
                   {subjects.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
+                    <option key={s.id} value={s.id}>{s.name} {s.code ? `(${s.code})` : ''}</option>
                   ))}
                 </select>
               </div>
             </div>
           </Card>
 
-          {/* STEP 3: Topic Selection Mode */}
-          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+          {/* STEP 2: TOPIC SELECTION */}
+          <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-                2. Topic Selection
-              </h2>
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6] text-xs font-bold flex items-center justify-center">2</span>
+                <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Select Topics</h2>
+              </div>
+
               <div className="flex items-center gap-1 p-1 rounded-xl bg-[#eef2f6] dark:bg-[#1f2538] border border-[#e2e8f0] dark:border-[#2b334d]">
                 <button
                   type="button"
-                  onClick={() => setTopicSelectionMode('single')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                    topicSelectionMode === 'single' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
-                  }`}
-                >
-                  One Topic
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTopicSelectionMode('multi')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
-                    topicSelectionMode === 'multi' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
-                  }`}
-                >
-                  Multiple Topics
-                </button>
-                <button
-                  type="button"
                   onClick={() => setTopicSelectionMode('all')}
-                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-colors ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
                     topicSelectionMode === 'all' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
                   }`}
                 >
                   All Topics
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTopicSelectionMode('single')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                    topicSelectionMode === 'single' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
+                  }`}
+                >
+                  Single Topic
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTopicSelectionMode('multi')}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+                    topicSelectionMode === 'multi' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
+                  }`}
+                >
+                  Multiple
+                </button>
               </div>
             </div>
 
-            {/* Single Topic Dropdown */}
             {topicSelectionMode === 'single' && (
               <div className="space-y-1">
-                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                  Choose Topic
-                </label>
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Choose Topic</label>
                 <select
                   value={selectedSingleTopicId}
                   onChange={e => setSelectedSingleTopicId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
                 >
                   {topics.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.code ? `${t.code}. ` : ''}{t.name}
-                    </option>
+                    <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
                 </select>
               </div>
             )}
 
-            {/* Multiple Topics Checkboxes */}
             {topicSelectionMode === 'multi' && (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-[#64748b]">Select topics to include:</span>
-                  <div className="flex items-center gap-3 font-semibold">
-                    <button type="button" onClick={handleSelectAllTopics} className="text-[#5b5bd6] hover:underline">
-                      Select All
-                    </button>
-                    <button type="button" onClick={handleClearAllTopics} className="text-[#64748b] hover:underline">
-                      Clear
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
-                  {topics.map((t, idx) => {
-                    const isChecked = selectedTopicIds.includes(t.id);
-                    return (
-                      <label
-                        key={t.id}
-                        className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6]/40 text-[#172033] dark:text-white font-semibold'
-                            : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleTopicCheckbox(t.id)}
-                          className="w-4 h-4 rounded border-[#cbd5e1] text-[#5b5bd6] focus:ring-[#5b5bd6]"
-                        />
-                        <span className="truncate">{t.code ? `${t.code}. ` : `${idx + 1}. `}{t.name}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {topicSelectionMode === 'all' && (
-              <p className="text-xs text-[#64748b] dark:text-[#9496a8] italic">
-                All {topics.length} topics from this course will be randomly sampled.
-              </p>
-            )}
-          </Card>
-
-          {/* STEP 4: Question Count */}
-          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-                3. Number of Questions
-              </h2>
-              <span className="text-xs font-bold text-[#5b5bd6] dark:text-[#8282ea]">
-                {loadingQuestions ? 'Calculating...' : `${availableQuestions.length} Questions Available`}
-              </span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {[5, 10, 15, 25, 50, 100].map(count => (
-                <button
-                  key={count}
-                  type="button"
-                  onClick={() => {
-                    setQuestionCount(count);
-                    setIsCustomCount(false);
-                  }}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                    !isCustomCount && questionCount === count
-                      ? 'bg-[#5b5bd6] text-white shadow-xs'
-                      : 'bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#64748b] hover:text-[#172033]'
-                  }`}
-                >
-                  {count}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => setIsCustomCount(true)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  isCustomCount
-                    ? 'bg-[#5b5bd6] text-white shadow-xs'
-                    : 'bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#64748b] hover:text-[#172033]'
-                }`}
-              >
-                Custom
-              </button>
-            </div>
-
-            {isCustomCount && (
-              <div className="pt-1 flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max={availableQuestions.length || 500}
-                  value={customCountInput}
-                  onChange={e => setCustomCountInput(e.target.value)}
-                  className="w-28 px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold text-[#172033] dark:text-white outline-none focus:border-[#5b5bd6]"
-                />
-                <span className="text-xs text-[#64748b]">questions to practice</span>
-              </div>
-            )}
-          </Card>
-
-          {/* STEP 5: Mode & Timed Exam */}
-          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
-            <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-              4. Practice Mode & Timer
-            </h2>
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => setExamMode('practice')}
-                className={`p-3.5 rounded-xl border text-left transition-all ${
-                  examMode === 'practice'
-                    ? 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6]/40 text-[#5b5bd6] font-bold shadow-xs'
-                    : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
-                }`}
-              >
-                <div className="text-sm font-bold">Standard Practice</div>
-                <div className="text-[11px] font-normal text-[#64748b] mt-0.5">
-                  No strict timer, instant explanation review enabled
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setExamMode('timed')}
-                className={`p-3.5 rounded-xl border text-left transition-all ${
-                  examMode === 'timed'
-                    ? 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6]/40 text-[#5b5bd6] font-bold shadow-xs'
-                    : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
-                }`}
-              >
-                <div className="text-sm font-bold">Timed Exam Simulation</div>
-                <div className="text-[11px] font-normal text-[#64748b] mt-0.5">
-                  Countdown timer, auto-submit at zero, realistic scoring
-                </div>
-              </button>
-            </div>
-
-            {examMode === 'timed' && (
-              <div className="pt-2 space-y-2">
-                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                  Timer Duration
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  {[15, 30, 45, 60].map(mins => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() => {
-                        setTimerMinutes(mins);
-                        setIsCustomTimer(false);
-                      }}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                        !isCustomTimer && timerMinutes === mins
-                          ? 'bg-[#5b5bd6] text-white shadow-xs'
-                          : 'bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#64748b]'
-                      }`}
+              <div className="space-y-2 max-h-48 overflow-y-auto p-2 border border-[#e2e8f0] dark:border-[#2b334d] rounded-xl bg-[#f8fafc] dark:bg-[#181d2f]">
+                {topics.map(t => {
+                  const isChecked = selectedTopicIds.includes(t.id);
+                  return (
+                    <label
+                      key={t.id}
+                      className="flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] cursor-pointer text-xs"
                     >
-                      {mins} mins
-                    </button>
-                  ))}
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() => handleToggleTopicCheckbox(t.id)}
+                        className="w-4 h-4 text-[#5b5bd6] rounded"
+                      />
+                      <span className="font-semibold text-[#101828] dark:text-[#f8f9fc]">{t.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          {/* STEP 3: QUESTION QUANTITY & MODE */}
+          <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6] text-xs font-bold flex items-center justify-center">3</span>
+              <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Questions & Session Mode</h2>
+            </div>
+
+            {/* Quantity */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Number of Questions</label>
+              <div className="flex flex-wrap gap-2">
+                {[10, 15, 25, 50].map(cnt => (
                   <button
+                    key={cnt}
                     type="button"
-                    onClick={() => setIsCustomTimer(true)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      isCustomTimer
-                        ? 'bg-[#5b5bd6] text-white shadow-xs'
-                        : 'bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#64748b]'
+                    onClick={() => { setQuestionCount(cnt); setIsCustomCount(false); }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                      !isCustomCount && questionCount === cnt
+                        ? 'bg-[#5b5bd6] text-white border-[#5b5bd6]'
+                        : 'bg-white dark:bg-[#181d2f] border-[#d0d5dd] dark:border-[#2b334d] text-[#64748b]'
                     }`}
                   >
-                    Custom
+                    {cnt} Questions
                   </button>
-                </div>
-
-                {isCustomTimer && (
-                  <div className="pt-1 flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      value={customTimerMinutes}
-                      onChange={e => setCustomTimerMinutes(e.target.value)}
-                      className="w-24 px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold text-[#172033] dark:text-white outline-none focus:border-[#5b5bd6]"
-                    />
-                    <span className="text-xs text-[#64748b]">minutes</span>
-                  </div>
-                )}
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setIsCustomCount(true)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                    isCustomCount
+                      ? 'bg-[#5b5bd6] text-white border-[#5b5bd6]'
+                      : 'bg-white dark:bg-[#181d2f] border-[#d0d5dd] dark:border-[#2b334d] text-[#64748b]'
+                  }`}
+                >
+                  Custom
+                </button>
               </div>
-            )}
+
+              {isCustomCount && (
+                <input
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={customCountInput}
+                  onChange={e => setCustomCountInput(e.target.value)}
+                  placeholder="Enter question count..."
+                  className="w-48 px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none"
+                />
+              )}
+            </div>
+
+            {/* Exam Mode Toggle */}
+            <div className="space-y-2 pt-2 border-t border-[#e2e8f0] dark:border-[#23293d]">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Session Type</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setExamMode('practice')}
+                  className={`p-4 rounded-xl border text-left space-y-1 transition-all ${
+                    examMode === 'practice'
+                      ? 'bg-[#5b5bd6]/10 border-[#5b5bd6] text-[#5b5bd6] font-bold'
+                      : 'bg-white dark:bg-[#181d2f] border-[#d0d5dd] dark:border-[#2b334d] text-[#64748b]'
+                  }`}
+                >
+                  <div className="text-xs font-bold">Self-Paced Practice</div>
+                  <p className="text-[11px] opacity-80">Immediate feedback, explanations & no time pressure</p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setExamMode('timed')}
+                  className={`p-4 rounded-xl border text-left space-y-1 transition-all ${
+                    examMode === 'timed'
+                      ? 'bg-[#0284c7]/10 border-[#0284c7] text-[#0284c7] font-bold'
+                      : 'bg-white dark:bg-[#181d2f] border-[#d0d5dd] dark:border-[#2b334d] text-[#64748b]'
+                  }`}
+                >
+                  <div className="text-xs font-bold">Timed Exam Test</div>
+                  <p className="text-[11px] opacity-80">Simulated test with timer and full score report at end</p>
+                </button>
+              </div>
+            </div>
           </Card>
         </div>
 
-        {/* Right Summary & Launch (4 cols) */}
+        {/* Right Side: Launch Summary Card (4 cols) */}
         <div className="lg:col-span-4 space-y-4">
-          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
-            <h2 className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
-              Session Summary
-            </h2>
+          <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-5 sticky top-20">
+            <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Session Summary</h3>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-3 text-xs">
               <div className="flex justify-between py-1.5 border-b border-[#e2e8f0] dark:border-[#23293d]">
-                <span className="text-[#64748b]">Course</span>
-                <span className="font-bold text-[#172033] dark:text-white">
-                  {courses.find(c => c.id === selectedCourseId)?.name || '—'}
-                </span>
+                <span className="text-[#64748b]">Available Questions:</span>
+                <strong className="text-[#5b5bd6] dark:text-[#8282ea]">{availableQuestions.length}</strong>
               </div>
+
               <div className="flex justify-between py-1.5 border-b border-[#e2e8f0] dark:border-[#23293d]">
-                <span className="text-[#64748b]">Topic Mode</span>
-                <span className="font-bold capitalize text-[#5b5bd6]">
-                  {topicSelectionMode === 'single' ? 'One Topic' : topicSelectionMode === 'multi' ? `${selectedTopicIds.length} Topics` : 'All Topics'}
-                </span>
+                <span className="text-[#64748b]">Selected Question Count:</span>
+                <strong>{Math.min(finalQuestionCount, availableQuestions.length)}</strong>
               </div>
+
               <div className="flex justify-between py-1.5 border-b border-[#e2e8f0] dark:border-[#23293d]">
-                <span className="text-[#64748b]">Total Questions</span>
-                <span className="font-extrabold text-[#172033] dark:text-white">
-                  {Math.min(finalQuestionCount, availableQuestions.length)}
-                </span>
-              </div>
-              <div className="flex justify-between py-1.5">
-                <span className="text-[#64748b]">Mode</span>
-                <span className="font-bold text-[#12b76a]">
-                  {examMode === 'timed' ? `Timed (${finalDurationMinutes}m)` : 'Untimed Practice'}
-                </span>
+                <span className="text-[#64748b]">Mode:</span>
+                <strong className="capitalize">{examMode === 'timed' ? 'Timed Test' : 'Practice'}</strong>
               </div>
             </div>
 
             <Button
               variant="primary"
               size="lg"
-              className="w-full font-bold bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white shadow-sm"
+              className="w-full font-bold bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white shadow-xs"
               leftIcon={<Play className="w-4 h-4 fill-white" />}
               onClick={handleStartSession}
-              disabled={availableQuestions.length === 0}
+              disabled={loadingQuestions || availableQuestions.length === 0}
             >
-              Start Practice Session
+              {availableQuestions.length === 0 ? 'No Questions in Pool' : 'Start Session'}
             </Button>
           </Card>
         </div>

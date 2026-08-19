@@ -30,7 +30,9 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
     elapsedSeconds,
     activeCourseId,
     activeCourseName,
+    activeSubjectId,
     activeSubjectName,
+    activeTopicId,
     activeTopicName,
     activeLessonName,
     isModalOpen,
@@ -58,13 +60,20 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
   const [completionNotes, setCompletionNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  // Sync preloaded course/subject/topic from timer context when modal opens
+  useEffect(() => {
+    if (activeCourseId) setSelectedCourseId(activeCourseId);
+    if (activeSubjectId) setSelectedSubjectId(activeSubjectId);
+    if (activeTopicId) setSelectedTopicId(activeTopicId);
+  }, [activeCourseId, activeSubjectId, activeTopicId, isModalOpen]);
+
   // Load courses
   useEffect(() => {
     async function loadCourses() {
       try {
         const loaded = await courseService.getCourses();
         setCourses(loaded);
-        if (loaded.length > 0 && !selectedCourseId) {
+        if (loaded.length > 0 && !selectedCourseId && !activeCourseId) {
           setSelectedCourseId(loaded[0].id);
         }
       } catch (err) {
@@ -74,7 +83,7 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
     if (isModalOpen) {
       loadCourses();
     }
-  }, [isModalOpen, currentUser.id]);
+  }, [isModalOpen, currentUser.id, activeCourseId]);
 
   // Load subjects when course changes
   useEffect(() => {
@@ -86,14 +95,16 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
       }
       const loaded = await courseService.getSubjects(selectedCourseId);
       setSubjects(loaded);
-      if (loaded.length > 0) {
+      if (activeSubjectId && loaded.some(s => s.id === activeSubjectId)) {
+        setSelectedSubjectId(activeSubjectId);
+      } else if (loaded.length > 0) {
         setSelectedSubjectId(loaded[0].id);
       } else {
         setSelectedSubjectId('');
       }
     }
     loadSubjects();
-  }, [selectedCourseId]);
+  }, [selectedCourseId, activeSubjectId]);
 
   // Load topics when subject/course changes
   useEffect(() => {
@@ -104,17 +115,18 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
         return;
       }
       const allTopics = await courseService.getTopics(selectedCourseId, selectedSubjectId || undefined);
-      // Top level topics have parent_topic_id === null
       const topTopics = allTopics.filter(t => !t.parent_topic_id);
       setTopics(topTopics);
-      if (topTopics.length > 0) {
+      if (activeTopicId && topTopics.some(t => t.id === activeTopicId)) {
+        setSelectedTopicId(activeTopicId);
+      } else if (topTopics.length > 0) {
         setSelectedTopicId(topTopics[0].id);
       } else {
         setSelectedTopicId('');
       }
     }
     loadTopics();
-  }, [selectedCourseId, selectedSubjectId]);
+  }, [selectedCourseId, selectedSubjectId, activeTopicId]);
 
   // Load child lessons when parent topic changes
   useEffect(() => {

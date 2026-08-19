@@ -1,23 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useUser } from '../context/UserContext';
 import { practiceService } from '../services/practiceService';
-import type { CloudQuestion, CloudPracticeSession } from '../lib/supabase';
+import type { CloudQuestion } from '../lib/supabase';
 import type { QuizConfig } from '../types';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
-import { ProgressBar } from '../components/common/ProgressBar';
 import {
   CheckCircle2,
-  XCircle,
-  ChevronRight,
-  ChevronLeft,
   Clock,
   Bookmark,
-  Check,
-  X,
-  RotateCcw,
-  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -137,7 +131,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
     const netScore = Math.max(
       0,
-      Number((correctCount * config.marksPerCorrect - wrongCount * config.negativeMarks).toFixed(2))
+      Number((correctCount * (config.marksPerCorrect || 1) - wrongCount * (config.negativeMarks || 0.25)).toFixed(2))
     );
     const accuracy = correctCount + wrongCount > 0
       ? Math.round((correctCount / (correctCount + wrongCount)) * 100)
@@ -193,14 +187,14 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   // CASE 1: Results Scorecard Screen
   if (isCompleted && resultsData) {
     return (
-      <div className="max-w-3xl mx-auto py-8 px-4 space-y-6 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
-        <Card className="p-8 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-sm text-center space-y-6">
-          <div className="w-16 h-16 rounded-full bg-[#f4fbf7] dark:bg-[#122820] text-emerald-600 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl font-bold">
+      <div className="max-w-3xl mx-auto py-8 px-4 space-y-6 animate-fade-in text-[#101828] dark:text-[#f8f9fc]">
+        <Card className="p-8 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl font-bold">
             ✓
           </div>
 
           <div className="space-y-1">
-            <h2 className="text-2xl font-extrabold text-[#172033] dark:text-white">
+            <h2 className="text-2xl font-extrabold text-[#101828] dark:text-white">
               Practice Session Completed!
             </h2>
             <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
@@ -210,19 +204,19 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
           {/* 4 Stat Boxes */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
-            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+            <div className="p-4 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
               <span className="text-xs font-bold text-[#64748b] uppercase">Score</span>
-              <div className="text-2xl font-extrabold text-[#5b5bd6] mt-1">{resultsData.score}</div>
+              <div className="text-2xl font-extrabold text-[#5b5bd6] dark:text-[#8282ea] mt-1">{resultsData.score}</div>
             </div>
-            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+            <div className="p-4 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
               <span className="text-xs font-bold text-[#64748b] uppercase">Accuracy</span>
               <div className="text-2xl font-extrabold text-[#12b76a] mt-1">{resultsData.accuracy}%</div>
             </div>
-            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+            <div className="p-4 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
               <span className="text-xs font-bold text-[#64748b] uppercase">Correct</span>
               <div className="text-2xl font-extrabold text-emerald-600 mt-1">{resultsData.correct} / {resultsData.total}</div>
             </div>
-            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+            <div className="p-4 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
               <span className="text-xs font-bold text-[#64748b] uppercase">Wrong</span>
               <div className="text-2xl font-extrabold text-rose-500 mt-1">{resultsData.wrong}</div>
             </div>
@@ -257,9 +251,9 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
   const isMarked = markedForReview[currentQuestion.id];
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4 space-y-5 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
+    <div className="max-w-4xl mx-auto py-6 px-4 space-y-5 animate-fade-in text-[#101828] dark:text-[#f8f9fc]">
       {/* Session Top Bar */}
-      <div className="p-4 rounded-2xl bg-[#fbfcfe] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] flex items-center justify-between shadow-xs">
+      <div className="p-4 rounded-2xl bg-white dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] flex items-center justify-between shadow-xs">
         <div className="flex items-center gap-3">
           <Badge variant="brand">
             Question {currentIndex + 1} of {questions.length}
@@ -271,7 +265,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
 
         <div className="flex items-center gap-3">
           {/* Timer Display */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-mono text-xs font-bold text-[#172033] dark:text-white">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-mono text-xs font-bold text-[#101828] dark:text-white">
             <Clock className="w-3.5 h-3.5 text-[#5b5bd6]" />
             <span>{isExamMode ? `${formatTimer(remainingSeconds)} Remaining` : formatTimer(elapsedSeconds)}</span>
           </div>
@@ -288,7 +282,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       </div>
 
       {/* Main Question Card */}
-      <Card className="p-6 sm:p-8 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-6">
+      <Card className="p-6 sm:p-8 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-6">
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#64748b] uppercase tracking-wider">
@@ -307,7 +301,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             </button>
           </div>
 
-          <h2 className="text-base sm:text-lg font-bold text-[#172033] dark:text-[#f8f9fc] leading-relaxed">
+          <h2 className="text-base sm:text-lg font-bold text-[#101828] dark:text-[#f8f9fc] leading-relaxed">
             {currentQuestion.question_text}
           </h2>
         </div>
@@ -323,7 +317,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
             let buttonStyle = 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#2b334d] text-[#334155] dark:text-[#cbd5e1] hover:border-[#5b5bd6]';
 
             if (isSelected) {
-              buttonStyle = 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6] text-[#5b5bd6] font-bold shadow-xs';
+              buttonStyle = 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6] text-[#5b5bd6] dark:text-[#8282ea] font-bold shadow-xs';
             }
 
             if (isPracticeRevealed) {
@@ -400,7 +394,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({
       </Card>
 
       {/* Question Palette / Number Jump Matrix */}
-      <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-2">
+      <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-2">
         <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
           <span>Question Palette</span>
           <span>{Object.keys(selectedAnswers).length} Answered</span>

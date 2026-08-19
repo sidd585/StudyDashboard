@@ -50,31 +50,31 @@ export const Modal: React.FC<ModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-fade-in">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/75 backdrop-blur-sm transition-opacity"
+        className="fixed inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
 
       {/* Modal Container */}
       <div
-        className={`relative w-full ${sizeClasses[size]} bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl shadow-black/80 z-10 overflow-hidden flex flex-col max-h-[90vh] animate-slide-up`}
+        className={`relative w-full ${sizeClasses[size]} bg-white dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] rounded-2xl shadow-2xl z-10 overflow-hidden flex flex-col max-h-[90vh] animate-slide-up text-[#101828] dark:text-[#f8f9fc] transition-colors`}
       >
         {/* Header */}
         {(title || showCloseButton) && (
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/90 flex-shrink-0">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[#e2e8f0] dark:border-[#23293d] bg-white/95 dark:bg-[#141824]/95 flex-shrink-0">
             <div>
               {typeof title === 'string' ? (
-                <h3 className="text-lg font-semibold text-slate-100">{title}</h3>
+                <h3 className="text-base sm:text-lg font-bold text-[#101828] dark:text-[#f8f9fc] tracking-tight">{title}</h3>
               ) : (
                 title
               )}
               {description && (
-                <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+                <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">{description}</p>
               )}
             </div>
             {showCloseButton && (
               <button
                 onClick={onClose}
-                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+                className="p-1.5 text-[#64748b] hover:text-[#101828] dark:text-[#9496a8] dark:hover:text-white hover:bg-[#f1f5f9] dark:hover:bg-[#1f2538] rounded-xl transition-colors"
                 aria-label="Close modal"
               >
                 <X className="w-5 h-5" />
@@ -84,7 +84,7 @@ export const Modal: React.FC<ModalProps> = ({
         )}
 
         {/* Content */}
-        <div className="p-6 overflow-y-auto flex-1 text-slate-200">{children}</div>
+        <div className="p-6 overflow-y-auto flex-1 text-[#334155] dark:text-[#cbd5e1]">{children}</div>
       </div>
     </div>
   );
