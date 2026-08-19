@@ -97,7 +97,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
             <img
               src={currentUser.avatarUrl}
               alt={currentUser.name}
-              className="w-9 h-9 rounded-full border border-slate-700 bg-slate-800"
+              className="w-9 h-9 rounded-full border border-slate-700 bg-slate-800 object-cover shadow-xs"
             />
             <div>
               <p className="text-sm font-semibold text-white leading-none">{currentUser.name}</p>

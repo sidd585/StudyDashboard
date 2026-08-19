@@ -9,17 +9,17 @@ export default {
     extend: {
       colors: {
         brand: {
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#6366f1',
-          700: '#6366f1',
-          800: '#6366f1',
-          900: '#6366f1',
-          950: '#6366f1',
+          50: 'var(--brand-50, #eef2ff)',
+          100: 'var(--brand-100, #e0e7ff)',
+          200: 'var(--brand-200, #c7d2fe)',
+          300: 'var(--brand-300, #a5b4fc)',
+          400: 'var(--brand-400, #818cf8)',
+          500: 'var(--brand-500, #6366f1)',
+          600: 'var(--brand-600, #4f46e5)',
+          700: 'var(--brand-700, #4338ca)',
+          800: 'var(--brand-800, #3730a3)',
+          900: 'var(--brand-900, #312e81)',
+          950: 'var(--brand-950, #1e1b4b)',
         },
         correct: {
           light: '#ecfdf5',

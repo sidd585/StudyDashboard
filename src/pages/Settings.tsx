@@ -23,6 +23,7 @@ import {
 import { sendDailySummaryEmail } from '../services/emailService';
 import { exportBackupData } from '../services/backupService';
 import { format, startOfDay, endOfDay } from 'date-fns';
+import { DAILY_PALETTES, applyDailyTheme } from '../utils/dailyTheme';
 
 type SettingsTab =
   | 'profile'
@@ -223,36 +224,95 @@ export const SettingsContent: React.FC = () => {
 
       {/* ================= TAB 2: APPEARANCE ================= */}
       {activeTab === 'appearance' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Color Theme</h3>
-          <p className="text-xs text-slate-500">Choose between clean Light Slate or Midnight Dark mode.</p>
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-6">
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Color Mode</h3>
+            <p className="text-xs text-slate-500">Choose between clean Light Slate or Midnight Dark mode.</p>
 
-          <div className="flex items-center gap-3 pt-1">
-            <button
-              type="button"
-              onClick={() => handleThemeChange('light')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
-                themeMode === 'light'
-                  ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
-                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              <Sun className="w-4 h-4 text-amber-500" />
-              <span>Light Mode (Clean Slate)</span>
-            </button>
+            <div className="flex items-center gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => handleThemeChange('light')}
+                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
+                  themeMode === 'light'
+                    ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                <Sun className="w-4 h-4 text-amber-500" />
+                <span>Light Mode (Clean Slate)</span>
+              </button>
 
-            <button
-              type="button"
-              onClick={() => handleThemeChange('dark')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
-                themeMode === 'dark'
-                  ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
-                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-              }`}
-            >
-              <Moon className="w-4 h-4 text-indigo-400" />
-              <span>Dark Mode (Midnight Slate)</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => handleThemeChange('dark')}
+                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
+                  themeMode === 'dark'
+                    ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                <Moon className="w-4 h-4 text-indigo-400" />
+                <span>Dark Mode (Midnight Slate)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Daily Rotating Color Refresh */}
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" />
+                  <span>Daily Color Refresh (Dynamic Accent)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  App colors refresh dynamically every day so studying stays visually exciting.
+                </p>
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                onClick={() => {
+                  localStorage.setItem('studydashboard_custom_theme_day', 'auto');
+                  applyDailyTheme();
+                  setSaveStatus('Theme set to automatic daily rotation!');
+                  setTimeout(() => setSaveStatus(null), 3000);
+                }}
+              >
+                Reset to Auto-Daily
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 pt-1">
+              {Object.entries(DAILY_PALETTES).map(([dayKey, pal]) => {
+                const dayNum = Number(dayKey);
+                return (
+                  <button
+                    key={dayKey}
+                    type="button"
+                    onClick={() => {
+                      applyDailyTheme(dayNum);
+                      setSaveStatus(`Theme changed to ${pal.dayName} (${pal.name})!`);
+                      setTimeout(() => setSaveStatus(null), 3000);
+                    }}
+                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:border-slate-300 text-left transition-all space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-900 dark:text-white">{pal.dayName}</span>
+                      <span
+                        className="w-4 h-4 rounded-full border border-white/40 shadow-xs shrink-0"
+                        style={{ backgroundColor: pal.previewColor }}
+                      />
+                    </div>
+                    <p className="text-[11px] font-semibold" style={{ color: pal.previewColor }}>{pal.name}</p>
+                    <p className="text-[10px] text-slate-400 line-clamp-1">{pal.description}</p>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </Card>
       )}

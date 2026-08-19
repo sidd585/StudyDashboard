@@ -31,12 +31,12 @@ export const USER_PROFILES: Record<ActiveUserProfile, UserProfile> = {
     id: '11111111-1111-1111-1111-111111111111',
     name: 'Siddhartha',
     email: 'siddhartha@studydashboard.local',
-    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=Siddhartha',
+    avatarUrl: '/avatars/panda.png',
   },
   shilpa: {
     id: '22222222-2222-2222-2222-222222222222',
     name: 'Shilpa',
     email: 'shilpa@studydashboard.local',
-    avatarUrl: 'https://api.dicebear.com/7.x/bottts/svg?seed=Shilpa',
+    avatarUrl: '/avatars/whale.png',
   }
 };

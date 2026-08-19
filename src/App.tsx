@@ -15,7 +15,7 @@ import { Materials } from './pages/Materials';
 import { Settings } from './pages/Settings';
 
 import { calculateKathmanduStreak } from './utils/dateUtils';
-
+import { applyDailyTheme } from './utils/dailyTheme';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 export const App: React.FC = () => {
@@ -23,6 +23,10 @@ export const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
   const [activePracticeSessionId, setActivePracticeSessionId] = useState<string | null>(null);
   const [selectedTargetId, setSelectedTargetId] = useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    applyDailyTheme();
+  }, []);
 
   // User's study sessions for streak calculation
   const userSessions = useLiveQuery(

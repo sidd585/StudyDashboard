@@ -88,7 +88,7 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
           <img
             src={currentUser.avatarUrl}
             alt={currentUser.name}
-            className="w-4 h-4 rounded-full"
+            className="w-5 h-5 rounded-full object-cover border border-slate-600 shadow-xs"
           />
           <span className="font-semibold text-white">{currentUser.name}</span>
           <ArrowLeftRight className="w-3 h-3 text-slate-400" />

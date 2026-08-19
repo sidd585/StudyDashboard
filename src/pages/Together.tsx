@@ -160,7 +160,7 @@ export const Together: React.FC = () => {
               <img
                 src={sidProfile.avatarUrl}
                 alt={sidProfile.name}
-                className="w-11 h-11 rounded-full border-2 border-brand-500 bg-slate-800"
+                className="w-11 h-11 rounded-full border-2 border-brand-500 bg-slate-800 object-cover shadow-sm"
               />
               <div>
                 <h3 className="text-base font-bold text-white leading-tight">Siddhartha</h3>
@@ -222,7 +222,7 @@ export const Together: React.FC = () => {
               <img
                 src={shilpaProfile.avatarUrl}
                 alt={shilpaProfile.name}
-                className="w-11 h-11 rounded-full border-2 border-pink-500 bg-slate-800"
+                className="w-11 h-11 rounded-full border-2 border-pink-500 bg-slate-800 object-cover shadow-sm"
               />
               <div>
                 <h3 className="text-base font-bold text-white leading-tight">Shilpa</h3>
