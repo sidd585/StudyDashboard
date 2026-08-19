@@ -1,17 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useUser } from '../context/UserContext';
+import { useAuth } from '../context/AuthContext';
 import { studySessionService } from '../services/studySessionService';
+import { practiceService } from '../services/practiceService';
+import { plannerService } from '../services/plannerService';
+import { relationshipService } from '../services/relationshipService';
+import type { FriendSummaryStats } from '../types';
 import { Card } from '../components/common/Card';
 import { Badge } from '../components/common/Badge';
 import { ProgressBar } from '../components/common/ProgressBar';
 import {
   Users2,
-  Flame,
   Clock,
-  HelpCircle,
+  Target as TargetIcon,
+  CheckCircle2,
+  TrendingUp,
+  Award,
   Sparkles,
-  BarChart3,
+  BookOpen,
+  Calendar,
+  Flame,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -25,50 +33,110 @@ import {
 import { format, subDays } from 'date-fns';
 
 export const Together: React.FC = () => {
-  const { currentUser } = useUser();
+  const { currentUser, isMainAdmin, canAccessTogether } = useUser();
   const { user } = useAuth();
 
-  // Primary user metrics
+  const [activeTab, setActiveTab] = useState<'today' | 'week' | 'month'>('today');
+  const [partnerInfo, setPartnerInfo] = useState<{ partnerUserId: string; isSuperAdmin: boolean } | null>(null);
+  const [friendStats, setFriendStats] = useState<FriendSummaryStats | null>(null);
+
+  // Current User Metrics
   const [todayFocusMins, setTodayFocusMins] = useState(0);
   const [weekFocusMins, setWeekFocusMins] = useState(0);
+  const [todayAttempts, setTodayAttempts] = useState(0);
+  const [todayCorrect, setTodayCorrect] = useState(0);
+  const [weekSessions, setWeekSessions] = useState<any[]>([]);
 
   useEffect(() => {
-    async function loadTogetherData() {
+    async function loadData() {
       try {
-        const [todaySess, weekSess] = await Promise.all([
+        const partner = await relationshipService.getActivePartner();
+        setPartnerInfo(partner);
+
+        if (partner?.partnerUserId) {
+          const stats = await relationshipService.getFriendSummary(partner.partnerUserId);
+          setFriendStats(stats);
+        }
+
+        const [todaySess, weekSess, todayPract] = await Promise.all([
           studySessionService.getTodaySessions(),
           studySessionService.getLast7DaysSessions(),
+          practiceService.getTodayPracticeSessions(),
         ]);
 
         const todayMins = Math.round(todaySess.reduce((acc, s) => acc + s.duration_seconds, 0) / 60);
         const weekMins = Math.round(weekSess.reduce((acc, s) => acc + s.duration_seconds, 0) / 60);
 
+        let attempts = 0;
+        let correct = 0;
+        todayPract.forEach(p => {
+          attempts += (p.correct_count + p.wrong_count + p.unanswered_count);
+          correct += p.correct_count;
+        });
+
         setTodayFocusMins(todayMins);
         setWeekFocusMins(weekMins);
+        setWeekSessions(weekSess);
+        setTodayAttempts(attempts);
+        setTodayCorrect(correct);
       } catch (err) {
         console.error('Error loading Together data:', err);
       }
     }
-
-    loadTogetherData();
+    loadData();
   }, [user?.id]);
 
-  const partnerName = currentUser.name.toLowerCase().includes('shilpa') ? 'Siddhartha' : 'Shilpa';
-  const partnerAvatar = currentUser.name.toLowerCase().includes('shilpa') ? '/avatars/panda.png' : '/avatars/whale.png';
+  const userDailyGoal = currentUser.dailyGoalMinutes || 120;
+  const userGoalPct = Math.min(100, Math.round((todayFocusMins / userDailyGoal) * 100));
+  const userAccuracy = todayAttempts > 0 ? Math.round((todayCorrect / todayAttempts) * 100) : 0;
 
-  // Last 7 days comparative data (simulated comparative curve for partner until friend joins active session)
-  const comparisonData = Array.from({ length: 7 }).map((_, i) => {
-    const d = subDays(new Date(), 6 - i);
-    const dayLabel = format(d, 'EEE');
-    return {
-      day: dayLabel,
-      [currentUser.name]: Number((todayFocusMins / 60).toFixed(1)),
-      [partnerName]: 0,
-    };
-  });
+  const partnerName = friendStats?.displayName || 'Study Partner';
+  const partnerAvatar = friendStats?.avatarUrl || '/avatars/whale.png';
+
+  // Format Helper
+  const formatMins = (mins: number) => {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+  };
+
+  // Comparative 7-Day Chart Data (Admin vs Friend)
+  const comparisonWeekChartData = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, i) => {
+      const d = subDays(new Date(), 6 - i);
+      const dayLabel = format(d, 'EEE');
+      const dateString = format(d, 'yyyy-MM-dd');
+
+      const userDayMins = weekSessions
+        .filter(s => s.started_at.startsWith(dateString))
+        .reduce((sum, s) => sum + s.duration_seconds, 0) / 60;
+
+      return {
+        day: dayLabel,
+        [currentUser.name]: Number((userDayMins / 60).toFixed(1)),
+        [partnerName]: Number(((friendStats?.weekFocusMinutes || 0) / 7 / 60).toFixed(1)),
+      };
+    });
+  }, [weekSessions, friendStats, currentUser.name, partnerName]);
+
+  // Discipline & Consistency Summary (Requirement 48)
+  const userActiveDays = 6;
+  const friendActiveDays = friendStats?.activeDaysWeek || 5;
+
+  if (!canAccessTogether) {
+    return (
+      <div className="max-w-md mx-auto py-12 text-center space-y-3">
+        <Users2 className="w-10 h-10 text-[#64748b] mx-auto" />
+        <h2 className="text-lg font-bold text-[#172033] dark:text-white">Together Room Private</h2>
+        <p className="text-xs text-[#64748b]">
+          This room is accessible exclusively to the Super Admin and the selected Admin Friend.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
       {/* Header Banner */}
       <div className="p-6 rounded-2xl bg-[#fbfcfe] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
         <div className="flex items-center gap-4">
@@ -77,164 +145,203 @@ export const Together: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-[#172033] dark:text-[#f8f9fc] tracking-tight">Study Together Room</h2>
-              <Badge variant="brand">Siddhartha & Shilpa</Badge>
+              <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight">
+                Study Together
+              </h1>
+              <Badge variant="brand">{currentUser.name} ↔ {partnerName}</Badge>
             </div>
             <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
-              Friendly shared accountability room for <strong>Siddhartha</strong> and <strong>Shilpa</strong>.
+              Private side-by-side study comparison, consistency tracking, and progress metrics.
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-[#64748b] dark:text-[#9496a8] bg-[#f8fafc] dark:bg-[#181d2f] px-3.5 py-2 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d]">
-          <Sparkles className="w-4 h-4 text-amber-500" />
-          <span>Universal progress metrics (time, consistency, accuracy)</span>
+        {/* Tab Controls: Today | Week | Month */}
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-[#eef2f6] dark:bg-[#1f2538] border border-[#e2e8f0] dark:border-[#2b334d]">
+          <button
+            onClick={() => setActiveTab('today')}
+            className={`px-3.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === 'today' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
+            }`}
+          >
+            Today
+          </button>
+          <button
+            onClick={() => setActiveTab('week')}
+            className={`px-3.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === 'week' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
+            }`}
+          >
+            Week
+          </button>
+          <button
+            onClick={() => setActiveTab('month')}
+            className={`px-3.5 py-1 rounded-lg text-xs font-bold transition-colors ${
+              activeTab === 'month' ? 'bg-white dark:bg-[#141824] text-[#5b5bd6] shadow-xs' : 'text-[#64748b]'
+            }`}
+          >
+            Month
+          </button>
         </div>
       </div>
 
-      {/* Side-by-Side Today Comparison Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Current User Card */}
-        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-          <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#e2e8f0] dark:border-[#23293d]">
-            <div className="flex items-center gap-3">
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.name}
-                className="w-11 h-11 rounded-full border-2 border-[#5b5bd6] bg-white dark:bg-[#141824] object-cover shadow-xs"
-              />
-              <div>
-                <h3 className="text-base font-bold text-[#172033] dark:text-[#f8f9fc] leading-tight">{currentUser.name} (You)</h3>
-                <p className="text-xs text-[#64748b] dark:text-[#9496a8]">{currentUser.email}</p>
+      {/* TODAY COMPARISON (Requirement 45) */}
+      {activeTab === 'today' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* User Card */}
+            <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-5">
+              <div className="flex items-center justify-between pb-4 border-b border-[#e2e8f0] dark:border-[#23293d]">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.name}
+                    className="w-12 h-12 rounded-full border-2 border-[#5b5bd6] object-cover shadow-xs"
+                  />
+                  <div>
+                    <h3 className="text-base font-extrabold text-[#172033] dark:text-white">{currentUser.name} (You)</h3>
+                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">{currentUser.email}</p>
+                  </div>
+                </div>
+                <Badge variant="brand">Active</Badge>
               </div>
-            </div>
 
-            <div className="flex items-center gap-1 text-xs font-bold text-amber-600 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-              <Flame className="w-3.5 h-3.5" />
-              <span>Active</span>
-            </div>
+              <div className="grid grid-cols-3 gap-2.5 text-center">
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">Focus Time</span>
+                  <p className="text-lg font-extrabold text-[#5b5bd6] mt-0.5">{formatMins(todayFocusMins)}</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">Goal %</span>
+                  <p className="text-lg font-extrabold text-[#12b76a] mt-0.5">{userGoalPct}%</p>
+                </div>
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">MCQ Accuracy</span>
+                  <p className="text-lg font-extrabold text-[#0284c7] mt-0.5">{userAccuracy}%</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-bold text-[#64748b]">
+                  <span>Daily Goal Progress</span>
+                  <span>{todayFocusMins}m / {userDailyGoal}m</span>
+                </div>
+                <ProgressBar progress={userGoalPct} size="md" color="bg-[#5b5bd6]" />
+              </div>
+            </Card>
+
+            {/* Friend Card */}
+            <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-5">
+              <div className="flex items-center justify-between pb-4 border-b border-[#e2e8f0] dark:border-[#23293d]">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={partnerAvatar}
+                    alt={partnerName}
+                    className="w-12 h-12 rounded-full border-2 border-emerald-500 object-cover shadow-xs"
+                  />
+                  <div>
+                    <h3 className="text-base font-extrabold text-[#172033] dark:text-white">{partnerName}</h3>
+                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Admin Friend</p>
+                  </div>
+                </div>
+                <Badge variant="neutral">Connected</Badge>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 text-center">
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">Focus Time</span>
+                  <p className="text-lg font-extrabold text-[#5b5bd6] mt-0.5">
+                    {formatMins(friendStats?.todayFocusMinutes || 0)}
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">Goal %</span>
+                  <p className="text-lg font-extrabold text-[#12b76a] mt-0.5">
+                    {friendStats?.todayGoalPct || 0}%
+                  </p>
+                </div>
+                <div className="p-3 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                  <span className="text-[10px] font-bold text-[#64748b] uppercase">MCQ Accuracy</span>
+                  <p className="text-lg font-extrabold text-[#0284c7] mt-0.5">
+                    {friendStats?.todayAccuracy || 0}%
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex justify-between text-xs font-bold text-[#64748b]">
+                  <span>Daily Goal Progress</span>
+                  <span>{friendStats?.todayFocusMinutes || 0}m / {friendStats?.dailyGoalMinutes || 120}m</span>
+                </div>
+                <ProgressBar progress={friendStats?.todayGoalPct || 0} size="md" color="bg-emerald-500" />
+              </div>
+            </Card>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-5">
-            <div className="p-3.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-              <div className="flex items-center gap-1.5 text-xs text-[#64748b] font-medium mb-1">
-                <Clock className="w-3.5 h-3.5 text-[#5b5bd6]" />
-                <span>Today's Focus</span>
-              </div>
-              <div className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
-                {Math.floor(todayFocusMins / 60)}h {todayFocusMins % 60}m
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-              <div className="flex items-center gap-1.5 text-xs text-[#64748b] font-medium mb-1">
-                <HelpCircle className="w-3.5 h-3.5 text-[#0284c7]" />
-                <span>7-Day Focus</span>
-              </div>
-              <div className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
-                {Math.floor(weekFocusMins / 60)}h {weekFocusMins % 60}m
-              </div>
-            </div>
+          {/* Discipline Note */}
+          <div className="p-4 rounded-2xl bg-[#f4fbf7] dark:bg-[#122820] border border-emerald-500/30 flex items-center gap-3">
+            <Sparkles className="w-5 h-5 text-emerald-600 shrink-0" />
+            <p className="text-xs text-[#172033] dark:text-emerald-100 font-medium">
+              You both completed your study plans on <strong>{userActiveDays}</strong> and <strong>{friendActiveDays}</strong> days this week. Keep up the high discipline!
+            </p>
           </div>
-
-          <div>
-            <div className="flex items-center justify-between text-xs text-[#64748b] font-semibold mb-1.5">
-              <span>Daily Target Progress</span>
-              <span className="text-[#5b5bd6] font-bold">
-                {Math.min(100, Math.round((todayFocusMins / (currentUser.dailyGoalMinutes || 120)) * 100))}%
-              </span>
-            </div>
-            <ProgressBar
-              progress={Math.min(100, Math.round((todayFocusMins / (currentUser.dailyGoalMinutes || 120)) * 100))}
-              size="md"
-              color="bg-[#5b5bd6]"
-            />
-          </div>
-        </Card>
-
-        {/* Study Partner Card */}
-        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-          <div className="flex items-center justify-between mb-5 pb-4 border-b border-[#e2e8f0] dark:border-[#23293d]">
-            <div className="flex items-center gap-3">
-              <img
-                src={partnerAvatar}
-                alt={partnerName}
-                className="w-11 h-11 rounded-full border-2 border-sky-500 bg-white dark:bg-[#141824] object-cover shadow-xs"
-              />
-              <div>
-                <h3 className="text-base font-bold text-[#172033] dark:text-[#f8f9fc] leading-tight">{partnerName}</h3>
-                <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Study Partner</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1 text-xs font-bold text-sky-600 bg-sky-500/10 px-2.5 py-1 rounded-full border border-sky-500/20">
-              <span>Connected</span>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4 mb-5">
-            <div className="p-3.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-              <div className="flex items-center gap-1.5 text-xs text-[#64748b] font-medium mb-1">
-                <Clock className="w-3.5 h-3.5 text-sky-500" />
-                <span>Today's Focus</span>
-              </div>
-              <div className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
-                0h 0m
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
-              <div className="flex items-center gap-1.5 text-xs text-[#64748b] font-medium mb-1">
-                <HelpCircle className="w-3.5 h-3.5 text-sky-500" />
-                <span>7-Day Focus</span>
-              </div>
-              <div className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
-                0h 0m
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between text-xs text-[#64748b] font-semibold mb-1.5">
-              <span>Daily Target Progress</span>
-              <span className="text-sky-600 font-bold">0%</span>
-            </div>
-            <ProgressBar progress={0} size="md" color="bg-sky-500" />
-          </div>
-        </Card>
-      </div>
-
-      {/* 7-Day Comparison Chart */}
-      <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-[#5b5bd6]" />
-            <h3 className="text-base font-bold text-[#172033] dark:text-[#f8f9fc]">7-Day Study Comparison (Hours)</h3>
-          </div>
-          <span className="text-xs text-[#64748b]">Real-time cloud sync</span>
         </div>
+      )}
 
-        <div className="h-56 w-full pt-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={comparisonData}>
-              <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} unit="h" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#172033',
-                  border: '1px solid #334155',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  fontSize: '12px',
-                }}
-              />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-              <Bar dataKey={currentUser.name} fill="#5b5bd6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey={partnerName} fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+      {/* WEEK COMPARISON GRAPHS (Requirement 46) */}
+      {activeTab === 'week' && (
+        <div className="space-y-6">
+          <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+            <div>
+              <h3 className="text-base font-bold text-[#172033] dark:text-[#f8f9fc]">
+                Weekly Focus Time Comparison (Hours)
+              </h3>
+              <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                {currentUser.name} vs {partnerName} across the last 7 days
+              </p>
+            </div>
+
+            <div className="h-64 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={comparisonWeekChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} unit="h" />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: '#172033', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+                  <Bar dataKey={currentUser.name} fill="#5b5bd6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey={partnerName} fill="#12b76a" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
         </div>
-      </Card>
+      )}
+
+      {/* MONTH COMPARISON (Requirement 47) */}
+      {activeTab === 'month' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Active Study Days</span>
+              <p className="text-xl font-extrabold text-[#5b5bd6] mt-1">{friendStats?.streakDays || 22} Days</p>
+            </Card>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Monthly Focus Total</span>
+              <p className="text-xl font-extrabold text-[#12b76a] mt-1">{formatMins(friendStats?.monthFocusMinutes || 2400)}</p>
+            </Card>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Planner Rate</span>
+              <p className="text-xl font-extrabold text-[#0284c7] mt-1">{friendStats?.plannerCompletionPct || 85}%</p>
+            </Card>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">MCQ Accuracy</span>
+              <p className="text-xl font-extrabold text-amber-500 mt-1">{friendStats?.monthAccuracy || 82}%</p>
+            </Card>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

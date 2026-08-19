@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import React, { useState, useEffect, useRef } from 'react';
 import { useUser } from '../context/UserContext';
+import { practiceService } from '../services/practiceService';
+import type { CloudQuestion, CloudPracticeSession } from '../lib/supabase';
+import type { QuizConfig } from '../types';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
@@ -11,33 +12,37 @@ import {
   XCircle,
   ChevronRight,
   ChevronLeft,
-  RotateCcw,
-  HelpCircle,
-  Check,
-  X,
   Clock,
   Bookmark,
-  AlertOctagon,
+  Check,
+  X,
+  RotateCcw,
   ArrowRight,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import type { Question, QuizSession, QuizConfig } from '../types';
 
 interface PracticeSessionProps {
-  sessionId: string;
-  onFinish: (sessionId: string) => void;
+  sessionPayload: {
+    config: QuizConfig;
+    questions: CloudQuestion[];
+  };
+  onFinish: () => void;
   onExit: () => void;
 }
 
-export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onFinish, onExit }) => {
+export const PracticeSession: React.FC<PracticeSessionProps> = ({
+  sessionPayload,
+  onFinish,
+  onExit,
+}) => {
   const { currentUser } = useUser();
-  const session = useLiveQuery(() => db.quizSessions.get(sessionId), [sessionId]);
+  const { config, questions } = sessionPayload;
 
   const [currentIndex, setCurrentIndex] = useState<number>(0);
-  const [selectedOption, setSelectedOption] = useState<string | null>(null);
-  const [isAnswered, setIsAnswered] = useState<boolean>(false);
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [markedForReview, setMarkedForReview] = useState<Record<string, boolean>>({});
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Results State
   const [resultsData, setResultsData] = useState<{
@@ -45,343 +50,201 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
     correct: number;
     wrong: number;
     unanswered: number;
-    accuracy: number;
     score: number;
+    accuracy: number;
     timeSpentFormatted: string;
-    topicBreakdown: Record<string, { total: number; correct: number; pct: number }>;
-    wrongQuestionIds: string[];
   } | null>(null);
 
-  const questionIds = session?.questionIds || [];
-  const currentQuestionId = questionIds[currentIndex];
-
-  const currentQuestion = useLiveQuery(
-    () => (currentQuestionId ? db.questions.get(currentQuestionId) : undefined),
-    [currentQuestionId]
-  );
-
-  const isExamMode = session?.config?.mode === 'exam';
-  const durationMinutes = session?.config?.durationMinutes || 45;
+  const isExamMode = config.mode === 'exam';
+  const durationMinutes = config.durationMinutes || 30;
   const totalExamSeconds = durationMinutes * 60;
-  const remainingSeconds = Math.max(0, totalExamSeconds - elapsedSeconds);
+
+  // Persistent Timestamps
+  const startTimeRef = useRef<number>(Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
 
   // Timer Tick
   useEffect(() => {
     if (isCompleted) return;
 
     const timer = setInterval(() => {
-      setElapsedSeconds(prev => {
-        const next = prev + 1;
-        if (isExamMode && next >= totalExamSeconds) {
-          clearInterval(timer);
-          finishPractice();
-        }
-        return next;
-      });
+      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      setElapsedSeconds(elapsed);
+
+      if (isExamMode && elapsed >= totalExamSeconds) {
+        clearInterval(timer);
+        handleFinishSession();
+      }
     }, 1000);
 
     return () => clearInterval(timer);
   }, [isCompleted, isExamMode, totalExamSeconds]);
 
-  // Sync state on question change
-  useEffect(() => {
-    if (!session || !currentQuestionId) return;
-    const existing = session.answers[currentQuestionId];
-    if (existing && existing.selectedOptionId) {
-      setSelectedOption(existing.selectedOptionId);
-      setIsAnswered(true);
-    } else {
-      setSelectedOption(null);
-      setIsAnswered(false);
-    }
-  }, [currentIndex, currentQuestionId, session]);
+  const currentQuestion = questions[currentIndex];
+  const remainingSeconds = Math.max(0, totalExamSeconds - elapsedSeconds);
 
-  // Toggle Bookmark
-  const handleToggleBookmark = async () => {
+  const formatTimer = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleSelectOption = (optionKey: 'A' | 'B' | 'C' | 'D') => {
+    if (!currentQuestion || isCompleted) return;
+    setSelectedAnswers(prev => ({
+      ...prev,
+      [currentQuestion.id]: optionKey,
+    }));
+  };
+
+  const toggleMarkForReview = () => {
     if (!currentQuestion) return;
-    await db.questions.update(currentQuestion.id, {
-      isBookmarked: !currentQuestion.isBookmarked,
-    });
+    setMarkedForReview(prev => ({
+      ...prev,
+      [currentQuestion.id]: !prev[currentQuestion.id],
+    }));
   };
 
-  // Toggle Difficult
-  const handleToggleDifficult = async () => {
-    if (!currentQuestion) return;
-    await db.questions.update(currentQuestion.id, {
-      isDifficult: !currentQuestion.isDifficult,
-    });
-  };
-
-  // Handle Option Select
-  const handleSelectOption = async (optionId: string) => {
-    if (!currentQuestion || !session) return;
-    if (isExamMode && isAnswered) {
-      // Allow changing answer in exam mode before final submit
-    } else if (isAnswered) {
-      return;
-    }
-
-    setSelectedOption(optionId);
-    setIsAnswered(true);
-
-    const isCorrect = optionId === currentQuestion.correctOptionId;
-
-    if (isCorrect && !isExamMode) {
-      confetti({ particleCount: 30, spread: 60, origin: { y: 0.8 } });
-    }
-
-    // Record attempt
-    await db.attempts.put({
-      id: `attempt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      userId: currentUser.id,
-      questionId: currentQuestion.id,
-      sessionId: session.id,
-      targetId: currentQuestion.targetId,
-      subjectId: currentQuestion.subjectId,
-      topicId: currentQuestion.topicId,
-      selectedOptionId: optionId,
-      correctOptionId: currentQuestion.correctOptionId,
-      isCorrect,
-      isSkipped: false,
-      responseTimeMs: 5000,
-      mode: isExamMode ? 'exam' : 'practice',
-      timestamp: Date.now(),
-    });
-
-    // Update question stats
-    await db.questions.update(currentQuestion.id, {
-      'stats.totalAttempts': (currentQuestion.stats?.totalAttempts || 0) + 1,
-      'stats.correctAttempts': (currentQuestion.stats?.correctAttempts || 0) + (isCorrect ? 1 : 0),
-      'stats.wrongAttempts': (currentQuestion.stats?.wrongAttempts || 0) + (isCorrect ? 0 : 1),
-      'stats.lastResult': isCorrect ? 'correct' : 'wrong',
-      'stats.lastAttemptedAt': Date.now(),
-    });
-
-    // Save answer to session
-    const updatedAnswers = {
-      ...session.answers,
-      [currentQuestion.id]: {
-        selectedOptionId: optionId,
-        isMarkedForReview: false,
-        responseTimeMs: 5000,
-        answeredAt: Date.now(),
-      },
-    };
-
-    await db.quizSessions.update(session.id, {
-      answers: updatedAnswers,
-      currentQuestionIndex: currentIndex,
-    });
-  };
-
-  const handleNext = () => {
-    if (currentIndex < questionIds.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-    } else {
-      finishPractice();
-    }
-  };
-
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-    }
-  };
-
-  // Finalize practice & compute results
-  const finishPractice = async () => {
-    if (!session) return;
-
-    const allQuestions = await db.questions.where('id').anyOf(questionIds).toArray();
-    const topicsList = await db.topics.toArray();
+  // Submit and Calculate Score
+  const handleFinishSession = async () => {
+    if (isSubmitting || isCompleted) return;
+    setIsSubmitting(true);
 
     let correctCount = 0;
     let wrongCount = 0;
     let unansweredCount = 0;
-    const wrongIds: string[] = [];
-    const topicBreakdown: Record<string, { total: number; correct: number; pct: number }> = {};
 
-    allQuestions.forEach(q => {
-      const topicName = topicsList.find(t => t.id === q.topicId)?.name || 'General';
-      if (!topicBreakdown[topicName]) {
-        topicBreakdown[topicName] = { total: 0, correct: 0, pct: 0 };
-      }
-      topicBreakdown[topicName].total += 1;
+    const answerDetails = questions.map(q => {
+      const chosen = selectedAnswers[q.id] || null;
+      const correctAns = q.correct_answer?.trim().toUpperCase();
+      const isCorrect = Boolean(chosen && correctAns && chosen === correctAns);
 
-      const ans = session.answers[q.id];
-      if (!ans || !ans.selectedOptionId) {
-        unansweredCount += 1;
-      } else if (ans.selectedOptionId === q.correctOptionId) {
-        correctCount += 1;
-        topicBreakdown[topicName].correct += 1;
+      if (!chosen) {
+        unansweredCount++;
+      } else if (isCorrect) {
+        correctCount++;
       } else {
-        wrongCount += 1;
-        wrongIds.push(q.id);
+        wrongCount++;
       }
+
+      return {
+        questionId: q.id,
+        selectedOption: chosen,
+        isCorrect,
+        markedForReview: Boolean(markedForReview[q.id]),
+      };
     });
 
-    Object.keys(topicBreakdown).forEach(k => {
-      const t = topicBreakdown[k];
-      t.pct = t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0;
-    });
+    const netScore = Math.max(
+      0,
+      Number((correctCount * config.marksPerCorrect - wrongCount * config.negativeMarks).toFixed(2))
+    );
+    const accuracy = correctCount + wrongCount > 0
+      ? Math.round((correctCount / (correctCount + wrongCount)) * 100)
+      : 0;
 
-    const total = questionIds.length;
-    const accuracy = (correctCount + wrongCount) > 0 ? Math.round((correctCount / (correctCount + wrongCount)) * 100) : 0;
-    const score = (correctCount * 2) - (wrongCount * 0.4);
-
-    const m = Math.floor(elapsedSeconds / 60);
-    const s = elapsedSeconds % 60;
-    const timeFormatted = `${m}m ${s < 10 ? '0' : ''}${s}s`;
-
-    await db.quizSessions.update(session.id, {
-      status: 'completed',
-      completedAt: Date.now(),
-      totalTimeSpentMs: elapsedSeconds * 1000,
-    });
+    // Record in Supabase
+    try {
+      if (config.courseId) {
+        await practiceService.recordPracticeSession({
+          courseId: config.courseId,
+          mode: isExamMode ? 'TIMED' : 'PRACTICE',
+          questionIds: questions.map(q => q.id),
+          durationSeconds: elapsedSeconds,
+          score: netScore,
+          correctCount,
+          wrongCount,
+          unansweredCount,
+          answers: answerDetails,
+        });
+      }
+    } catch (err) {
+      console.error('Error saving practice attempt:', err);
+    }
 
     setResultsData({
-      total,
+      total: questions.length,
       correct: correctCount,
       wrong: wrongCount,
       unanswered: unansweredCount,
+      score: netScore,
       accuracy,
-      score: Math.max(0, Number(score.toFixed(1))),
-      timeSpentFormatted: timeFormatted,
-      topicBreakdown,
-      wrongQuestionIds: wrongIds,
+      timeSpentFormatted: formatTimer(elapsedSeconds),
     });
 
     setIsCompleted(true);
+    setIsSubmitting(false);
+
+    if (accuracy >= 70) {
+      confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
+    }
   };
 
-  // Launch wrong questions practice session
-  const handlePracticeWrongQuestions = async () => {
-    if (!resultsData || resultsData.wrongQuestionIds.length === 0) return;
-
-    const newSessionId = `session-wrong-${Date.now()}`;
-    const newConfig: QuizConfig = {
-      mode: 'practice',
-      title: `Revision: Wrong Questions (${resultsData.wrongQuestionIds.length} Qs)`,
-      subjectIds: [],
-      topicIds: [],
-      questionCount: resultsData.wrongQuestionIds.length,
-      marksPerCorrect: 1,
-      negativeMarks: 0,
-      shuffleQuestions: true,
-      shuffleOptions: false,
-      immediateFeedback: true,
-    };
-
-    await db.quizSessions.put({
-      id: newSessionId,
-      userId: currentUser.id,
-      title: newConfig.title,
-      mode: 'practice',
-      status: 'in_progress',
-      config: newConfig,
-      questionIds: resultsData.wrongQuestionIds,
-      answers: {},
-      currentQuestionIndex: 0,
-      startedAt: Date.now(),
-      completedAt: null,
-      totalTimeSpentMs: 0,
-    });
-
-    window.location.reload();
+  // Option text resolution
+  const getOptionText = (q: CloudQuestion, opt: 'A' | 'B' | 'C' | 'D') => {
+    switch (opt) {
+      case 'A': return q.option_a;
+      case 'B': return q.option_b;
+      case 'C': return q.option_c;
+      case 'D': return q.option_d;
+    }
   };
 
-  // Format Timer Strings
-  const formatCountdown = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
-  };
-
-  // ================= RESULTS SCREEN =================
+  // CASE 1: Results Scorecard Screen
   if (isCompleted && resultsData) {
     return (
-      <div className="max-w-2xl mx-auto space-y-6 pb-16 animate-fade-in">
-        <Card className="p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm text-center space-y-6">
-          <div className="w-16 h-16 rounded-full bg-brand-50 dark:bg-brand-950 border border-brand-500/30 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto text-2xl">
-            {resultsData.accuracy >= 75 ? '🎉' : '📊'}
+      <div className="max-w-3xl mx-auto py-8 px-4 space-y-6 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
+        <Card className="p-8 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-sm text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-[#f4fbf7] dark:bg-[#122820] text-emerald-600 border border-emerald-500/30 flex items-center justify-center mx-auto text-2xl font-bold">
+            ✓
           </div>
 
-          <div>
-            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
-              {isExamMode ? 'Exam Completed' : 'Practice Finished'}
+          <div className="space-y-1">
+            <h2 className="text-2xl font-extrabold text-[#172033] dark:text-white">
+              Practice Session Completed!
             </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Time Used: <strong>{resultsData.timeSpentFormatted}</strong> • {session?.title}
+            <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+              {config.title} · Time Spent: {resultsData.timeSpentFormatted}
             </p>
           </div>
 
-          {/* 4 Main Score Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Score</span>
-              <p className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">{resultsData.score}</p>
+          {/* 4 Stat Boxes */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Score</span>
+              <div className="text-2xl font-extrabold text-[#5b5bd6] mt-1">{resultsData.score}</div>
             </div>
-
-            <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30">
-              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Correct</span>
-              <p className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">{resultsData.correct}</p>
+            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Accuracy</span>
+              <div className="text-2xl font-extrabold text-[#12b76a] mt-1">{resultsData.accuracy}%</div>
             </div>
-
-            <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-500/30">
-              <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider">Wrong</span>
-              <p className="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-0.5">{resultsData.wrong}</p>
+            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Correct</span>
+              <div className="text-2xl font-extrabold text-emerald-600 mt-1">{resultsData.correct} / {resultsData.total}</div>
             </div>
-
-            <div className="p-3.5 rounded-2xl bg-brand-50 dark:bg-brand-950/40 border border-brand-500/30">
-              <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider">Accuracy</span>
-              <p className="text-xl font-extrabold text-brand-600 dark:text-brand-400 mt-0.5">{resultsData.accuracy}%</p>
-            </div>
-          </div>
-
-          {/* Topic-wise Breakdown */}
-          <div className="text-left space-y-3 pt-2">
-            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-              Topic-Wise Accuracy Breakdown
-            </h4>
-            <div className="space-y-2">
-              {Object.entries(resultsData.topicBreakdown).map(([topName, data]) => (
-                <div
-                  key={topName}
-                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between text-xs"
-                >
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-xs">{topName}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-slate-500">{data.correct} / {data.total}</span>
-                    <Badge variant={data.pct >= 75 ? 'success' : data.pct >= 50 ? 'warning' : 'danger'} size="sm">
-                      {data.pct}%
-                    </Badge>
-                  </div>
-                </div>
-              ))}
+            <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Wrong</span>
+              <div className="text-2xl font-extrabold text-rose-500 mt-1">{resultsData.wrong}</div>
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="space-y-2.5 pt-4 border-t border-slate-200 dark:border-slate-800">
-            {resultsData.wrongQuestionIds.length > 0 && (
-              <Button
-                variant="primary"
-                size="lg"
-                className="w-full font-bold"
-                leftIcon={<RotateCcw className="w-4 h-4" />}
-                onClick={handlePracticeWrongQuestions}
-              >
-                Practice {resultsData.wrongQuestionIds.length} Wrong Questions Now
-              </Button>
-            )}
-
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-4 border-t border-[#e2e8f0] dark:border-[#23293d]">
             <Button
               variant="outline"
-              size="lg"
-              className="w-full font-semibold"
+              size="md"
+              className="bg-white dark:bg-[#181d2f] text-[#64748b] font-bold"
               onClick={onExit}
             >
-              Back to Question Bank / Dashboard
+              Back to Practice Setup
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
+              onClick={onFinish}
+            >
+              Go to Dashboard
             </Button>
           </div>
         </Card>
@@ -389,149 +252,187 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
     );
   }
 
-  // ================= ACTIVE PRACTICE RUNNER =================
+  // CASE 2: Active Question Practice Screen
+  const currentSelected = selectedAnswers[currentQuestion.id];
+  const isMarked = markedForReview[currentQuestion.id];
+
   return (
-    <div className="max-w-3xl mx-auto space-y-5 pb-16 animate-fade-in">
-      {/* Top Runner Header Bar */}
-      <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-        <button
-          type="button"
-          onClick={onExit}
-          className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white"
-        >
-          ✕ Exit
-        </button>
-
-        <div className="text-xs font-bold text-slate-900 dark:text-white">
-          Question {currentIndex + 1} of {questionIds.length}
+    <div className="max-w-4xl mx-auto py-6 px-4 space-y-5 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
+      {/* Session Top Bar */}
+      <div className="p-4 rounded-2xl bg-[#fbfcfe] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-3">
+          <Badge variant="brand">
+            Question {currentIndex + 1} of {questions.length}
+          </Badge>
+          <span className="text-xs font-bold text-[#64748b] hidden sm:inline truncate max-w-xs">
+            {config.title}
+          </span>
         </div>
 
-        {/* Live Countdown Clock for Exam Mode, or Elapsed for Practice */}
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 text-xs font-bold font-mono">
-          <Clock className="w-3.5 h-3.5" />
-          <span>{isExamMode ? `${formatCountdown(remainingSeconds)} Left` : formatCountdown(elapsedSeconds)}</span>
-        </div>
+        <div className="flex items-center gap-3">
+          {/* Timer Display */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-mono text-xs font-bold text-[#172033] dark:text-white">
+            <Clock className="w-3.5 h-3.5 text-[#5b5bd6]" />
+            <span>{isExamMode ? `${formatTimer(remainingSeconds)} Remaining` : formatTimer(elapsedSeconds)}</span>
+          </div>
 
-        <Button variant="outline" size="sm" onClick={finishPractice}>
-          Submit Test
-        </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs font-bold text-rose-600 border-rose-300 dark:border-rose-900/40 hover:bg-rose-50"
+            onClick={onExit}
+          >
+            Exit
+          </Button>
+        </div>
       </div>
 
-      {/* Question Card */}
-      {currentQuestion ? (
-        <Card className="p-6 sm:p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-6">
-          {/* Question Tag Bar */}
-          <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800/80 pb-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{currentIndex + 1}</span>
-              <Badge variant={currentQuestion.difficulty === 'hard' ? 'danger' : 'warning'} size="sm">
-                {currentQuestion.difficulty}
-              </Badge>
-            </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleToggleBookmark}
-                className={`p-1.5 rounded-lg border text-xs ${
-                  currentQuestion.isBookmarked
-                    ? 'bg-amber-50 dark:bg-amber-950 border-amber-400 text-amber-600'
-                    : 'border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
-                }`}
-                title="Bookmark Question"
-              >
-                <Bookmark className="w-3.5 h-3.5" />
-              </button>
-            </div>
+      {/* Main Question Card */}
+      <Card className="p-6 sm:p-8 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-6">
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-[#64748b] uppercase tracking-wider">
+              Question #{currentIndex + 1}
+            </span>
+            <button
+              onClick={toggleMarkForReview}
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-colors ${
+                isMarked
+                  ? 'bg-amber-500/10 text-amber-600 border border-amber-500/30'
+                  : 'text-[#64748b] hover:bg-[#eef2f6] dark:hover:bg-[#181d2f]'
+              }`}
+            >
+              <Bookmark className={`w-3.5 h-3.5 ${isMarked ? 'fill-current' : ''}`} />
+              <span>{isMarked ? 'Marked for Review' : 'Mark for Review'}</span>
+            </button>
           </div>
 
-          {/* Statement */}
-          <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed">
-            {currentQuestion.questionText}
-          </h3>
+          <h2 className="text-base sm:text-lg font-bold text-[#172033] dark:text-[#f8f9fc] leading-relaxed">
+            {currentQuestion.question_text}
+          </h2>
+        </div>
 
-          {/* Options */}
-          <div className="space-y-3">
-            {currentQuestion.options.map(opt => {
-              const isSelected = selectedOption === opt.id;
-              const isCorrectAnswer = opt.id === currentQuestion.correctOptionId;
+        {/* Options A, B, C, D */}
+        <div className="space-y-2.5">
+          {(['A', 'B', 'C', 'D'] as const).map(optKey => {
+            const optText = getOptionText(currentQuestion, optKey);
+            const isSelected = currentSelected === optKey;
+            const isPracticeRevealed = !isExamMode && currentSelected;
+            const isCorrectAnswer = currentQuestion.correct_answer?.trim().toUpperCase() === optKey;
 
-              let style = 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200';
+            let buttonStyle = 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#2b334d] text-[#334155] dark:text-[#cbd5e1] hover:border-[#5b5bd6]';
 
-              if (isExamMode) {
-                // Exam Mode: Only show selected option, no answers revealed
-                if (isSelected) {
-                  style = 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 text-brand-900 dark:text-brand-100 ring-1 ring-brand-500 font-semibold';
-                }
-              } else if (isAnswered) {
-                // Practice Mode: Instant color feedback
-                if (isCorrectAnswer) {
-                  style = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-900 dark:text-emerald-200 font-semibold ring-1 ring-emerald-500';
-                } else if (isSelected && !isCorrectAnswer) {
-                  style = 'bg-rose-50 dark:bg-rose-950/40 border-rose-500 text-rose-900 dark:text-rose-200 font-semibold ring-1 ring-rose-500';
-                }
-              } else if (isSelected) {
-                style = 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 text-brand-900 dark:text-brand-100 ring-1 ring-brand-500';
+            if (isSelected) {
+              buttonStyle = 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6] text-[#5b5bd6] font-bold shadow-xs';
+            }
+
+            if (isPracticeRevealed) {
+              if (isCorrectAnswer) {
+                buttonStyle = 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 text-emerald-700 dark:text-emerald-300 font-bold';
+              } else if (isSelected && !isCorrectAnswer) {
+                buttonStyle = 'bg-rose-50 dark:bg-rose-950/30 border-rose-500 text-rose-700 dark:text-rose-300 font-bold';
               }
+            }
 
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleSelectOption(opt.id)}
-                  className={`w-full p-4 rounded-xl border text-left text-xs sm:text-sm flex items-center gap-3.5 transition-all ${style}`}
-                >
-                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                    isSelected ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600'
-                  }`}>
-                    {opt.id}
-                  </span>
-                  <span className="flex-1 leading-snug">{opt.text}</span>
+            return (
+              <button
+                key={optKey}
+                onClick={() => handleSelectOption(optKey)}
+                className={`w-full p-4 rounded-2xl border text-left flex items-start gap-3.5 transition-all ${buttonStyle}`}
+              >
+                <span className={`w-6 h-6 rounded-lg text-xs font-extrabold flex items-center justify-center shrink-0 ${
+                  isSelected ? 'bg-[#5b5bd6] text-white' : 'bg-[#eef2f6] dark:bg-[#141824] text-[#64748b]'
+                }`}>
+                  {optKey}
+                </span>
+                <span className="text-xs sm:text-sm font-medium leading-normal pt-0.5">{optText}</span>
+              </button>
+            );
+          })}
+        </div>
 
-                  {!isExamMode && isAnswered && isCorrectAnswer && (
-                    <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-                  )}
-                  {!isExamMode && isAnswered && isSelected && !isCorrectAnswer && (
-                    <X className="w-5 h-5 text-rose-600 shrink-0" />
-                  )}
-                </button>
-              );
-            })}
+        {/* Practice Mode Explanation Box */}
+        {!isExamMode && currentSelected && currentQuestion.explanation && (
+          <div className="p-4 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] space-y-1 animate-fade-in">
+            <span className="text-xs font-bold text-[#5b5bd6] dark:text-[#8282ea]">Explanation:</span>
+            <p className="text-xs text-[#64748b] dark:text-[#9496a8] leading-relaxed">
+              {currentQuestion.explanation}
+            </p>
           </div>
+        )}
 
-          {/* Explanation in Practice Mode */}
-          {!isExamMode && isAnswered && currentQuestion.explanation && (
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 space-y-1">
-              <span className="font-bold text-slate-900 dark:text-white">Explanation:</span>
-              <p>{currentQuestion.explanation}</p>
-            </div>
-          )}
+        {/* Bottom Navigation & Submit */}
+        <div className="flex items-center justify-between pt-4 border-t border-[#e2e8f0] dark:border-[#23293d]">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentIndex(prev => Math.max(0, prev - 1))}
+            disabled={currentIndex === 0}
+            leftIcon={<ChevronLeft className="w-4 h-4" />}
+          >
+            Previous
+          </Button>
 
-          {/* Bottom Navigation */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800/80">
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={<ChevronLeft className="w-4 h-4" />}
-              onClick={handlePrev}
-              disabled={currentIndex === 0}
-            >
-              Previous
-            </Button>
-
-            <Button
-              variant="primary"
-              size="sm"
-              rightIcon={<ChevronRight className="w-4 h-4" />}
-              onClick={handleNext}
-            >
-              {currentIndex === questionIds.length - 1 ? 'Finish & Submit' : 'Next Question'}
-            </Button>
+          <div className="flex items-center gap-2">
+            {currentIndex < questions.length - 1 ? (
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
+                onClick={() => setCurrentIndex(prev => Math.min(questions.length - 1, prev + 1))}
+                rightIcon={<ChevronRight className="w-4 h-4" />}
+              >
+                Next
+              </Button>
+            ) : (
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-xs px-6"
+                onClick={handleFinishSession}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Submitting...' : 'Submit Session'}
+              </Button>
+            )}
           </div>
-        </Card>
-      ) : (
-        <Card className="p-8 text-center text-slate-400">Loading question...</Card>
-      )}
+        </div>
+      </Card>
+
+      {/* Question Palette / Number Jump Matrix */}
+      <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-2">
+        <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
+          <span>Question Palette</span>
+          <span>{Object.keys(selectedAnswers).length} Answered</span>
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {questions.map((q, idx) => {
+            const isAnswered = Boolean(selectedAnswers[q.id]);
+            const isMarked = Boolean(markedForReview[q.id]);
+            const isCurrent = currentIndex === idx;
+
+            let pillStyle = 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]';
+            if (isCurrent) {
+              pillStyle = 'bg-[#5b5bd6] text-white font-bold border-[#5b5bd6]';
+            } else if (isMarked) {
+              pillStyle = 'bg-amber-500/10 border-amber-500/40 text-amber-600 font-bold';
+            } else if (isAnswered) {
+              pillStyle = 'bg-emerald-500/10 border-emerald-500/40 text-emerald-600 font-bold';
+            }
+
+            return (
+              <button
+                key={q.id}
+                onClick={() => setCurrentIndex(idx)}
+                className={`w-8 h-8 rounded-lg border text-xs flex items-center justify-center transition-all ${pillStyle}`}
+              >
+                {idx + 1}
+              </button>
+            );
+          })}
+        </div>
+      </Card>
     </div>
   );
 };

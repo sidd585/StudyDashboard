@@ -79,7 +79,7 @@ export function calculateQuizResults(
     return map[id];
   };
 
-  session.questionIds.forEach(qId => {
+  session.questionIds.forEach((qId: string) => {
     const question = questionsMap.get(qId);
     const answer = session.answers[qId];
 

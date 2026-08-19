@@ -431,7 +431,7 @@ export const AIStudyBuilderModal: React.FC<AIStudyBuilderModalProps> = ({
               </div>
 
               <div className="space-y-2">
-                {researchSummary.observedTopics.map((item, idx) => (
+                {researchSummary.observedTopics.map((item: any, idx: number) => (
                   <div
                     key={idx}
                     className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 flex items-center justify-between"

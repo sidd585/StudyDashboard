@@ -12,7 +12,6 @@ export const migrationService = {
       const planner = await db.studySchedules.count();
       return { targets, questions, studySessions, planner };
     } catch (e) {
-      console.warn('Dexie check error:', e);
       return { targets: 0, questions: 0, studySessions: 0, planner: 0 };
     }
   },
@@ -52,7 +51,7 @@ export const migrationService = {
       }
 
       // 2. Migrate Questions to Cloud Questions Bank
-      const cloudQuestions: QuestionInsertInput[] = localQuestions.map(q => {
+      const cloudQuestions: QuestionInsertInput[] = localQuestions.map((q: any) => {
         const mappedCourseId = targetIdToCourseIdMap.get(q.targetId) || null;
         const optA = q.options?.[0]?.text || 'Option A';
         const optB = q.options?.[1]?.text || 'Option B';
@@ -61,7 +60,7 @@ export const migrationService = {
         
         let correctLetter: string = 'UNKNOWN';
         if (q.correctOptionId) {
-          const idx = q.options?.findIndex(o => o.id === q.correctOptionId);
+          const idx = q.options?.findIndex((o: any) => o.id === q.correctOptionId);
           if (idx !== -1 && idx < 4) {
             correctLetter = ['A', 'B', 'C', 'D'][idx];
           }

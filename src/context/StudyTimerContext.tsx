@@ -1,16 +1,22 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { db } from '../db';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useUser } from './UserContext';
-import type { StudyActivityType, Target, Subject } from '../types';
+import { studySessionService } from '../services/studySessionService';
+import { courseService } from '../services/courseService';
+import type { StudyActivityType } from '../types';
 
 export type TimerStatus = 'IDLE' | 'RUNNING' | 'PAUSED' | 'FINISHING' | 'COMPLETED';
 
 export interface ActiveStudySessionRecord {
   id: string;
   userId: string;
-  targetId: string;
-  targetName: string;
+  courseId: string;
+  courseName: string;
   subjectId?: string | null;
+  subjectName?: string | null;
+  topicId?: string | null;
+  topicName?: string | null;
+  lessonId?: string | null;
+  lessonName?: string | null;
   activityType: StudyActivityType;
   startedAt: number; // Timestamp ms
   pausedAt: number | null; // Timestamp ms if currently paused
@@ -24,13 +30,24 @@ interface StudyTimerContextType {
   isPaused: boolean;
   elapsedSeconds: number;
   formattedTime: string;
-  activeTargetId: string | null;
-  activeTargetName: string | null;
+  activeCourseId: string | null;
+  activeCourseName: string | null;
   activeSubjectId: string | null;
+  activeSubjectName: string | null;
+  activeTopicId: string | null;
+  activeTopicName: string | null;
+  activeLessonId: string | null;
+  activeLessonName: string | null;
   activeActivityType: StudyActivityType;
   isModalOpen: boolean;
-  isLongSession: boolean; // Flag if session running > 6 hours
-  startSession: (targetId: string, subjectId?: string, activity?: StudyActivityType) => Promise<void>;
+  isLongSession: boolean;
+  startSession: (
+    courseId: string,
+    subjectId?: string | null,
+    topicId?: string | null,
+    lessonId?: string | null,
+    activity?: StudyActivityType
+  ) => Promise<void>;
   pauseTimer: () => void;
   resumeTimer: () => void;
   stopTimer: (focusRating?: number, notes?: string) => Promise<string | null>;
@@ -41,10 +58,6 @@ interface StudyTimerContextType {
 const STORAGE_KEY_PREFIX = 'studydashboard_active_session_';
 const StudyTimerContext = createContext<StudyTimerContextType | undefined>(undefined);
 
-/**
- * Computes exact elapsed seconds from timestamps.
- * Elapsed = (Current or Paused Time - startedAt - totalPausedMs) / 1000
- */
 function computeElapsedSeconds(session: ActiveStudySessionRecord | null): number {
   if (!session || session.status === 'IDLE' || session.status === 'COMPLETED') {
     return 0;
@@ -59,9 +72,6 @@ function computeElapsedSeconds(session: ActiveStudySessionRecord | null): number
   return Math.floor(elapsedMs / 1000);
 }
 
-/**
- * Format total seconds to HH:MM:SS or MM:SS
- */
 export function formatSecondsToTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -76,7 +86,6 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const { currentUser } = useUser();
   const storageKey = `${STORAGE_KEY_PREFIX}${currentUser.id}`;
 
-  // Restore active session from persistent localStorage for current user
   const [activeSession, setActiveSession] = useState<ActiveStudySessionRecord | null>(() => {
     try {
       const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
@@ -96,7 +105,7 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // Sync state whenever user profile switches
+  // Sync state whenever user switches
   useEffect(() => {
     try {
       const raw = localStorage.getItem(`${STORAGE_KEY_PREFIX}${currentUser.id}`);
@@ -115,7 +124,6 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setElapsedSeconds(0);
   }, [currentUser.id]);
 
-  // Persist session changes to localStorage & BroadcastChannel for multi-tab sync
   const persistSession = useCallback((session: ActiveStudySessionRecord | null) => {
     setActiveSession(session);
     if (session) {
@@ -124,19 +132,16 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       localStorage.removeItem(storageKey);
     }
 
-    // Broadcast update across open tabs
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const channel = new BroadcastChannel('studydashboard_timer_channel');
         channel.postMessage({ type: 'TIMER_SYNC', session, userId: currentUser.id });
         channel.close();
       }
-    } catch (e) {
-      // Ignore broadcast errors in unsupported environments
-    }
+    } catch {}
   }, [storageKey, currentUser.id]);
 
-  // Listen to external tab sync events
+  // Tab sync
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === storageKey) {
@@ -155,7 +160,7 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return () => window.removeEventListener('storage', handleStorage);
   }, [storageKey]);
 
-  // Master UI refresh ticker: Recalculates elapsed seconds from true timestamps every second
+  // Master UI refresh ticker: Recalculates elapsed seconds from true timestamps locally every second
   useEffect(() => {
     if (!activeSession || activeSession.status !== 'RUNNING') {
       if (activeSession && activeSession.status === 'PAUSED') {
@@ -164,7 +169,6 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return;
     }
 
-    // Immediately compute on start/resume
     setElapsedSeconds(computeElapsedSeconds(activeSession));
 
     const interval = setInterval(() => {
@@ -176,32 +180,68 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // 1. START SESSION
   const startSession = async (
-    targetId: string,
-    subjectId?: string,
+    courseId: string,
+    subjectId?: string | null,
+    topicId?: string | null,
+    lessonId?: string | null,
     activity: StudyActivityType = 'Reading'
   ) => {
-    // If there is already an active running timer on another target, notify user
     if (activeSession && activeSession.status !== 'IDLE' && activeSession.status !== 'COMPLETED') {
-      if (activeSession.targetId !== targetId) {
+      if (activeSession.courseId !== courseId) {
         const confirmSwitch = window.confirm(
-          `You are already studying ${activeSession.targetName} (${formatSecondsToTime(elapsedSeconds)} elapsed).\n\nDo you want to finish the current session first?`
+          `You are already studying ${activeSession.courseName} (${formatSecondsToTime(elapsedSeconds)} elapsed).\n\nDo you want to finish the current session first?`
         );
         if (!confirmSwitch) return;
-        await stopTimer(4, 'Switched to a new target session');
+        await stopTimer(4, 'Switched to a new course session');
       } else {
-        // Same target, open modal
         setIsModalOpen(true);
         return;
       }
     }
 
-    const target = await db.targets.get(targetId);
+    // Resolve human names
+    let courseName = 'Course';
+    let subjectName: string | null = null;
+    let topicName: string | null = null;
+    let lessonName: string | null = null;
+
+    try {
+      const courses = await courseService.getCourses();
+      const matchCourse = courses.find(c => c.id === courseId);
+      if (matchCourse) courseName = matchCourse.name;
+
+      if (subjectId) {
+        const subjects = await courseService.getSubjects(courseId);
+        const matchSub = subjects.find(s => s.id === subjectId);
+        if (matchSub) subjectName = matchSub.name;
+      }
+
+      if (topicId) {
+        const topics = await courseService.getTopics(courseId);
+        const matchTop = topics.find(t => t.id === topicId);
+        if (matchTop) topicName = matchTop.name;
+      }
+
+      if (lessonId) {
+        const topics = await courseService.getTopics(courseId);
+        const matchLes = topics.find(t => t.id === lessonId);
+        if (matchLes) lessonName = matchLes.name;
+      }
+    } catch (e) {
+      console.warn('Could not fetch name metadata for timer:', e);
+    }
+
     const newSession: ActiveStudySessionRecord = {
       id: `session-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       userId: currentUser.id,
-      targetId,
-      targetName: target?.name || 'Study Target',
+      courseId,
+      courseName,
       subjectId: subjectId || null,
+      subjectName,
+      topicId: topicId || null,
+      topicName,
+      lessonId: lessonId || null,
+      lessonName,
       activityType: activity,
       startedAt: Date.now(),
       pausedAt: null,
@@ -241,43 +281,30 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     persistSession(updated);
   };
 
-  // 4. STOP / FINISH SESSION (Atomic, Prevents Double-Submissions)
+  // 4. STOP / FINISH SESSION
   const stopTimer = async (focusRating: number = 4, notes: string = ''): Promise<string | null> => {
     if (!activeSession || isSaving) return null;
 
     setIsSaving(true);
     try {
-      const now = Date.now();
       const finalElapsed = computeElapsedSeconds(activeSession);
-      const focusedMins = Math.max(1, Math.round(finalElapsed / 60));
-      const totalPausedMins = Math.round((activeSession.totalPausedMs + (activeSession.pausedAt ? now - activeSession.pausedAt : 0)) / 60000);
+      const durationSeconds = Math.max(10, finalElapsed);
 
-      const completedSessionId = activeSession.id;
+      // Save permanently to Supabase study_sessions
+      const saved = await studySessionService.recordCompletedSession(
+        activeSession.courseId,
+        durationSeconds,
+        activeSession.topicId || undefined,
+        notes.trim() || undefined
+      );
 
-      // Save permanently to Dexie db.studySessions
-      await db.studySessions.put({
-        id: completedSessionId,
-        userId: currentUser.id,
-        targetId: activeSession.targetId,
-        subjectId: activeSession.subjectId || undefined,
-        activityType: activeSession.activityType,
-        startTime: activeSession.startedAt,
-        endTime: now,
-        focusedMinutes: focusedMins,
-        breakMinutes: totalPausedMins,
-        focusRating,
-        notes: notes.trim() || undefined,
-        createdAt: now,
-      });
-
-      // Clear active session storage
       persistSession(null);
       setElapsedSeconds(0);
       setIsModalOpen(false);
 
-      return completedSessionId;
+      return saved?.id || activeSession.id;
     } catch (err) {
-      console.error('Failed to save completed study session:', err);
+      console.error('Failed to save completed study session in cloud:', err);
       return null;
     } finally {
       setIsSaving(false);
@@ -296,9 +323,14 @@ export const StudyTimerProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         isPaused,
         elapsedSeconds,
         formattedTime: formatSecondsToTime(elapsedSeconds),
-        activeTargetId: activeSession?.targetId || null,
-        activeTargetName: activeSession?.targetName || null,
+        activeCourseId: activeSession?.courseId || null,
+        activeCourseName: activeSession?.courseName || null,
         activeSubjectId: activeSession?.subjectId || null,
+        activeSubjectName: activeSession?.subjectName || null,
+        activeTopicId: activeSession?.topicId || null,
+        activeTopicName: activeSession?.topicName || null,
+        activeLessonId: activeSession?.lessonId || null,
+        activeLessonName: activeSession?.lessonName || null,
         activeActivityType: activeSession?.activityType || 'Reading',
         isModalOpen,
         isLongSession,

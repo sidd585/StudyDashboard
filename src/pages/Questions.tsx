@@ -1,29 +1,34 @@
-import React, { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import React, { useState, useEffect } from 'react';
 import { useUser } from '../context/UserContext';
+import { courseService } from '../services/courseService';
+import { questionService, type QuestionInsertInput } from '../services/questionService';
+import { subjectiveService } from '../services/subjectiveService';
+import { importMCQsFromPDF, importMCQsFromText } from '../services/import';
+import type { ParsedMCQCandidate } from '../services/import/types';
+import type { CloudCourse, CloudSubject, CloudTopic, CloudQuestion, CloudSubjectivePaper } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import {
-  Plus,
-  Upload,
-  Search,
-  CheckCircle2,
-  AlertTriangle,
+  HelpCircle,
   FileText,
-  Trash2,
+  Upload,
+  Plus,
+  Search,
   Eye,
   EyeOff,
-  Play,
-  RotateCcw,
-  Check,
+  Trash2,
+  CheckCircle2,
+  AlertTriangle,
+  BookOpen,
+  Filter,
+  Download,
+  ExternalLink,
+  ChevronLeft,
+  ChevronRight,
+  FolderArchive,
 } from 'lucide-react';
-import { importMCQsFromPDF, importMCQsFromText } from '../services/import';
-import { questionService } from '../services/questionService';
-import type { ParsedMCQCandidate, ImportDiagnostics } from '../services/import/types';
-import type { Question, Difficulty, QuestionOrigin } from '../types';
 import type { PageId } from '../components/layout/Sidebar';
 
 interface QuestionsProps {
@@ -33,86 +38,141 @@ interface QuestionsProps {
 export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
   const { currentUser } = useUser();
 
-  const targets = useLiveQuery(
-    () => db.targets.where('userId').equals(currentUser.id).toArray(),
-    [currentUser.id]
-  ) || [];
-
-  const [selectedTargetId, setSelectedTargetId] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<'mcq' | 'subjective'>('mcq');
+  const [courses, setCourses] = useState<CloudCourse[]>([]);
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
+  const [subjects, setSubjects] = useState<CloudSubject[]>([]);
+  const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
+  const [topics, setTopics] = useState<CloudTopic[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
-  const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
+  const [selectedYear, setSelectedYear] = useState<number | undefined>(undefined);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Answer visibility toggle state per question in list
+  // Course Question Counts Summary
+  const [courseMcqCounts, setCourseMcqCounts] = useState<Record<string, number>>({});
+  const [courseSubCounts, setCourseSubCounts] = useState<Record<string, number>>({});
+
+  // MCQ Questions List & Pagination
+  const [mcqList, setMcqList] = useState<CloudQuestion[]>([]);
+  const [totalMcqs, setTotalMcqs] = useState<number>(0);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const pageSize = 25;
   const [revealedAnswers, setRevealedAnswers] = useState<Record<string, boolean>>({});
 
-  // Modal States
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isUploadSuccessModalOpen, setIsUploadSuccessModalOpen] = useState(false);
-  const [isReviewProblemModalOpen, setIsReviewProblemModalOpen] = useState(false);
+  // Subjective Papers List
+  const [subjectiveList, setSubjectiveList] = useState<CloudSubjectivePaper[]>([]);
 
-  // Manual Question Form State
-  const [questionText, setQuestionText] = useState('');
-  const [optionA, setOptionA] = useState('');
-  const [optionB, setOptionB] = useState('');
-  const [optionC, setOptionC] = useState('');
-  const [optionD, setOptionD] = useState('');
-  const [correctOption, setCorrectOption] = useState<'A' | 'B' | 'C' | 'D'>('A');
-  const [explanation, setExplanation] = useState('');
-  const [difficulty, setDifficulty] = useState<Difficulty>('medium');
+  // Modals
+  const [isManualMcqModalOpen, setIsManualMcqModalOpen] = useState(false);
+  const [isUploadMcqModalOpen, setIsUploadMcqModalOpen] = useState(false);
+  const [isUploadSubjectiveModalOpen, setIsUploadSubjectiveModalOpen] = useState(false);
 
-  // Ingestion / PDF state
-  const [uploadStats, setUploadStats] = useState<{
+  // Large Upload Success / Partial Review Summary State
+  const [uploadSummary, setUploadSummary] = useState<{
     totalDetected: number;
     savedCount: number;
-    answersMapped: number;
-    needsReviewCount: number;
-    problematicQuestions: ParsedMCQCandidate[];
-    targetId: string;
-    topicId?: string;
+    uncertainCount: number;
+    uncertainQuestions: ParsedMCQCandidate[];
+    courseName: string;
+    year: number;
   } | null>(null);
 
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [extractingStage, setExtractingStage] = useState<string>('Reading PDF...');
-  const [rawPastedText, setRawPastedText] = useState('');
-  const [uploadTopicId, setUploadTopicId] = useState<string>('');
+  // MCQ Manual Form
+  const [manualText, setManualText] = useState('');
+  const [manualA, setManualA] = useState('');
+  const [manualB, setManualB] = useState('');
+  const [manualC, setManualC] = useState('');
+  const [manualD, setManualD] = useState('');
+  const [manualCorrect, setManualCorrect] = useState<'A' | 'B' | 'C' | 'D'>('A');
+  const [manualExplanation, setManualExplanation] = useState('');
 
-  const topics = useLiveQuery(
-    () => (selectedTargetId ? db.topics.where('targetId').equals(selectedTargetId).toArray() : []),
-    [selectedTargetId]
-  ) || [];
+  // Subjective Upload Form
+  const [subTitle, setSubTitle] = useState('');
+  const [subYear, setSubYear] = useState<number>(2027);
+  const [subFile, setSubFile] = useState<File | null>(null);
+  const [subSolutionFile, setSubSolutionFile] = useState<File | null>(null);
+  const [isUploadingSub, setIsUploadingSub] = useState(false);
 
-  const uploadTargetTopics = useLiveQuery(
-    () => (selectedTargetId ? db.topics.where('targetId').equals(selectedTargetId).toArray() : []),
-    [selectedTargetId]
-  ) || [];
+  // Load courses & initial summary
+  useEffect(() => {
+    async function loadInitialData() {
+      const loadedCourses = await courseService.getCourses();
+      setCourses(loadedCourses);
 
-  // Filtered Questions Query
-  const questions = useLiveQuery(
-    async () => {
-      let q = db.questions.where('userId').equals(currentUser.id);
-      if (selectedTargetId) {
-        q = db.questions.where('targetId').equals(selectedTargetId);
+      const mcqCounts = await questionService.getQuestionCountsByCourse();
+      setCourseMcqCounts(mcqCounts);
+
+      // Subjective counts
+      const allSubjective = await subjectiveService.getSubjectivePapers();
+      const subCounts: Record<string, number> = {};
+      allSubjective.forEach(p => {
+        subCounts[p.course_id] = (subCounts[p.course_id] || 0) + 1;
+      });
+      setCourseSubCounts(subCounts);
+    }
+    loadInitialData();
+  }, [currentUser.id]);
+
+  // Load subjects & topics for selected course
+  useEffect(() => {
+    async function loadHierarchy() {
+      if (!selectedCourseId) {
+        setSubjects([]);
+        setTopics([]);
+        return;
       }
-      let list = await q.toArray();
-      if (selectedTopicId) {
-        list = list.filter(item => item.topicId === selectedTopicId);
-      }
-      if (difficultyFilter !== 'all') {
-        list = list.filter(item => item.difficulty === difficultyFilter);
-      }
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        list = list.filter(item =>
-          item.questionText.toLowerCase().includes(query) ||
-          item.options.some(o => o.text.toLowerCase().includes(query))
-        );
-      }
-      return list;
-    },
-    [currentUser.id, selectedTargetId, selectedTopicId, difficultyFilter, searchQuery]
-  ) || [];
+      const [subs, tops] = await Promise.all([
+        courseService.getSubjects(selectedCourseId),
+        courseService.getTopics(selectedCourseId),
+      ]);
+      setSubjects(subs);
+      setTopics(tops.filter(t => !t.parent_topic_id));
+    }
+    loadHierarchy();
+  }, [selectedCourseId]);
+
+  // Query MCQ list
+  const loadMcqs = async () => {
+    if (!selectedCourseId) {
+      setMcqList([]);
+      setTotalMcqs(0);
+      return;
+    }
+    const res = await questionService.getQuestions({
+      courseId: selectedCourseId,
+      subjectId: selectedSubjectId || undefined,
+      topicId: selectedTopicId || undefined,
+      year: selectedYear,
+      search: searchQuery || undefined,
+      page: currentPage,
+      pageSize,
+    });
+    setMcqList(res.questions);
+    setTotalMcqs(res.total);
+  };
+
+  // Query Subjective list
+  const loadSubjective = async () => {
+    if (!selectedCourseId) {
+      setSubjectiveList([]);
+      return;
+    }
+    const list = await subjectiveService.getSubjectivePapers({
+      courseId: selectedCourseId,
+      subjectId: selectedSubjectId || undefined,
+      topicId: selectedTopicId || undefined,
+      year: selectedYear,
+    });
+    setSubjectiveList(list);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'mcq') {
+      loadMcqs();
+    } else {
+      loadSubjective();
+    }
+  }, [activeTab, selectedCourseId, selectedSubjectId, selectedTopicId, selectedYear, searchQuery, currentPage]);
 
   const toggleAnswerReveal = (questionId: string) => {
     setRevealedAnswers(prev => ({
@@ -121,758 +181,725 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
     }));
   };
 
-  // Handle Save Manual Question
-  const handleSaveManual = async (e: React.FormEvent) => {
+  // Handle Save Manual MCQ
+  const handleSaveManualMcq = async (e: React.FormEvent) => {
     e.preventDefault();
-    const targetIdToUse = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
-    if (!questionText.trim() || !targetIdToUse) return;
+    if (!selectedCourseId || !manualText.trim()) return;
 
-    const id = `q-${Date.now()}`;
-    await db.questions.put({
-      id,
-      userId: currentUser.id,
-      targetId: targetIdToUse,
-      topicId: selectedTopicId || undefined,
-      questionText: questionText.trim(),
-      options: [
-        { id: 'A', text: optionA.trim() },
-        { id: 'B', text: optionB.trim() },
-        { id: 'C', text: optionC.trim() },
-        { id: 'D', text: optionD.trim() },
-      ],
-      correctOptionId: correctOption,
-      explanation: explanation.trim(),
-      source: 'Manual Entry',
-      difficulty,
-      origin: 'USER_CREATED',
-      isShared: true,
-      isBookmarked: false,
-      isDifficult: false,
-      tags: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      stats: {
-        totalAttempts: 0,
-        correctAttempts: 0,
-        wrongAttempts: 0,
-        consecutiveCorrect: 0,
-        easeFactor: 2.5,
-        intervalDays: 1,
-      },
+    await questionService.createQuestion({
+      courseId: selectedCourseId,
+      subjectId: selectedSubjectId || null,
+      topicId: selectedTopicId || null,
+      questionText: manualText.trim(),
+      optionA: manualA.trim(),
+      optionB: manualB.trim(),
+      optionC: manualC.trim(),
+      optionD: manualD.trim(),
+      correctAnswer: manualCorrect,
+      explanation: manualExplanation.trim() || null,
+      year: selectedYear || 2027,
     });
 
-    // Reset Form
-    setQuestionText('');
-    setOptionA('');
-    setOptionB('');
-    setOptionC('');
-    setOptionD('');
-    setExplanation('');
-    setIsManualModalOpen(false);
+    setIsManualMcqModalOpen(false);
+    setManualText('');
+    setManualA('');
+    setManualB('');
+    setManualC('');
+    setManualD('');
+    setManualExplanation('');
+    loadMcqs();
   };
 
-  // Helper to directly store parsed questions into DB and open success modal
-  const processAndDirectlyStoreMCQs = async (
-    parsedQuestions: ParsedMCQCandidate[],
-    targetId: string,
-    topicId?: string,
-    sourceName: string = 'Uploaded PDF'
-  ) => {
-    if (!parsedQuestions.length) return;
-
-    const validOnes = parsedQuestions.filter(q => q.status === 'valid' && q.questionText.trim());
-    const problemOnes = parsedQuestions.filter(q => q.status !== 'valid' || !q.questionText.trim());
-
-    // Prepare questions to bulk insert
-    const now = Date.now();
-    const questionsToInsert: Question[] = validOnes.map((q, idx) => {
-      const cleanQuestionText = q.questionText
-        .replace(/(?:Answer|Ans|Correct(?:\s+Answer)?)[\s\:\.\-\=]+[A-D].*$/i, '')
-        .replace(/(?:Explanation|Solution|Sol)[\s\:\.\-\=]+.*$/i, '')
-        .trim();
-
-      const options = q.options.length >= 2 ? q.options : [
-        { id: 'A' as const, text: q.options[0]?.text || 'Option A' },
-        { id: 'B' as const, text: q.options[1]?.text || 'Option B' },
-        { id: 'C' as const, text: q.options[2]?.text || 'Option C' },
-        { id: 'D' as const, text: q.options[3]?.text || 'Option D' },
-      ];
-
-      return {
-        id: `q-imported-${now}-${idx}-${q.originalQuestionNumber}`,
-        userId: currentUser.id,
-        targetId: q.targetId || targetId,
-        topicId: topicId || q.topicId || undefined,
-        questionText: cleanQuestionText,
-        options,
-        correctOptionId: q.detectedAnswer || null,
-        explanation: q.explanation ? q.explanation.trim() : '',
-        source: sourceName,
-        difficulty: q.difficulty || 'medium',
-        origin: 'IMPORTED_OLD_QUESTION' as QuestionOrigin,
-        isShared: true,
-        isBookmarked: false,
-        isDifficult: false,
-        tags: [],
-        createdAt: now,
-        updatedAt: now,
-        stats: {
-          totalAttempts: 0,
-          correctAttempts: 0,
-          wrongAttempts: 0,
-          consecutiveCorrect: 0,
-          easeFactor: 2.5,
-          intervalDays: 1,
-        },
-      };
-    });
-
-    if (questionsToInsert.length > 0) {
-      await db.questions.bulkPut(questionsToInsert);
-
-      // Also persist directly to Supabase Cloud Question Bank
-      try {
-        const cloudQuestions = validOnes.map(q => {
-          const optA = q.options[0]?.text || 'Option A';
-          const optB = q.options[1]?.text || 'Option B';
-          const optC = q.options[2]?.text || 'Option C';
-          const optD = q.options[3]?.text || 'Option D';
-          return {
-            courseId: targetId,
-            topicId: topicId || null,
-            questionText: q.questionText,
-            optionA: optA,
-            optionB: optB,
-            optionC: optC,
-            optionD: optD,
-            correctAnswer: q.detectedAnswer || 'A',
-            explanation: q.explanation ? q.explanation.trim() : null,
-            sourceFileId: sourceName,
-            originalQuestionNumber: q.originalQuestionNumber || undefined,
-            answerStatus: 'VALID' as const,
-          };
-        });
-        await questionService.createQuestionsBatch(cloudQuestions);
-      } catch (cloudErr) {
-        console.warn('Cloud batch save note:', cloudErr);
-      }
-    }
-
-    const answersMappedCount = validOnes.filter(q => q.detectedAnswer).length;
-
-    setUploadStats({
-      totalDetected: parsedQuestions.length,
-      savedCount: questionsToInsert.length,
-      answersMapped: answersMappedCount,
-      needsReviewCount: problemOnes.length,
-      problematicQuestions: problemOnes,
-      targetId,
-      topicId,
-    });
-
-    setIsUploadModalOpen(false);
-    setIsUploadSuccessModalOpen(true);
-  };
-
-  // Handle File Upload
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle Large / Bulk MCQ Upload via PDF or text
+  const handleMcqFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !selectedCourseId) return;
 
-    const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
-    if (!targetId) {
-      alert('Please select a course / target before uploading a document.');
-      return;
-    }
-
-    setIsExtracting(true);
-    setExtractingStage('Extracting MCQs & mapping answers...');
     try {
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        const result = await importMCQsFromPDF(file, {
-          defaultTargetId: targetId,
-          sourceFileName: file.name,
-        });
+      const result = await importMCQsFromPDF(file);
+      const validCandidates = result.questions.filter(q => q.status === 'valid');
+      const uncertainCandidates = result.questions.filter(q => q.status !== 'valid');
 
-        if (result.questions.length > 0) {
-          await processAndDirectlyStoreMCQs(result.questions, targetId, uploadTopicId, file.name);
-        } else {
-          alert('Could not detect questions in this PDF. Please check if file is text-readable.');
-        }
-      } else {
-        const rawText = await file.text();
-        const result = importMCQsFromText(rawText, {
-          defaultTargetId: targetId,
-          sourceFileName: file.name,
-        });
+      // Convert valid candidates to QuestionInsertInput
+      const inputs: QuestionInsertInput[] = validCandidates.map(c => ({
+        courseId: selectedCourseId,
+        subjectId: selectedSubjectId || null,
+        topicId: selectedTopicId || null,
+        questionText: c.questionText,
+        optionA: c.options.find(o => o.id === 'A')?.text || '',
+        optionB: c.options.find(o => o.id === 'B')?.text || '',
+        optionC: c.options.find(o => o.id === 'C')?.text || '',
+        optionD: c.options.find(o => o.id === 'D')?.text || '',
+        correctAnswer: c.detectedAnswer || 'UNKNOWN',
+        explanation: c.explanation || null,
+        year: selectedYear || 2027,
+        sourceFileId: file.name,
+      }));
 
-        if (result.questions.length > 0) {
-          await processAndDirectlyStoreMCQs(result.questions, targetId, uploadTopicId, file.name);
-        } else {
-          alert('Could not extract questions from this text file.');
-        }
-      }
-    } catch (err: any) {
-      console.error('File extraction error:', err);
-      alert(`Error parsing file: ${err?.message || 'Please ensure it is a valid document.'}`);
-    } finally {
-      setIsExtracting(false);
-    }
-  };
+      // Batch insert valid questions into Supabase
+      const insertRes = await questionService.createQuestionsBatch(inputs);
 
-  const handleStartPracticeTest = (questionCount: number) => {
-    setIsUploadSuccessModalOpen(false);
-    if (onNavigate && uploadStats) {
-      onNavigate('practice', {
-        targetId: uploadStats.targetId,
-        topicId: uploadStats.topicId,
-        questionCount,
+      const courseName = courses.find(c => c.id === selectedCourseId)?.name || 'Course';
+
+      // Set summary dialog (Never flood screen with 200 cards)
+      setUploadSummary({
+        totalDetected: result.questions.length,
+        savedCount: insertRes.inserted,
+        uncertainCount: uncertainCandidates.length,
+        uncertainQuestions: uncertainCandidates,
+        courseName,
+        year: selectedYear || 2027,
       });
+
+      setIsUploadMcqModalOpen(false);
+      loadMcqs();
+    } catch (err) {
+      console.error('Error importing MCQs:', err);
+      alert('Failed to parse MCQ file.');
     }
   };
 
-  const handleDeleteQuestion = async (id: string) => {
-    if (confirm('Delete this question from your Question Bank?')) {
-      await db.questions.delete(id);
+  // Handle Save Subjective Paper
+  const handleUploadSubjective = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCourseId || !subTitle.trim() || !subFile) return;
+
+    setIsUploadingSub(true);
+    try {
+      await subjectiveService.uploadSubjectivePaper({
+        courseId: selectedCourseId,
+        subjectId: selectedSubjectId || null,
+        topicId: selectedTopicId || null,
+        paperTitle: subTitle.trim(),
+        year: subYear,
+        file: subFile,
+        solutionFile: subSolutionFile,
+      });
+
+      setIsUploadSubjectiveModalOpen(false);
+      setSubTitle('');
+      setSubFile(null);
+      setSubSolutionFile(null);
+      loadSubjective();
+    } catch (err) {
+      console.error('Error uploading subjective paper:', err);
+      alert('Error uploading paper to cloud.');
+    } finally {
+      setIsUploadingSub(false);
     }
   };
+
+  // Secure View Paper in New Tab
+  const handleViewSubjectivePaper = async (paper: CloudSubjectivePaper) => {
+    const url = await subjectiveService.getSecureViewUrl(paper.file_path);
+    if (url) {
+      window.open(url, '_blank');
+    } else {
+      alert('Unable to open paper file.');
+    }
+  };
+
+  const totalPages = Math.ceil(totalMcqs / pageSize) || 1;
 
   return (
-    <div className="space-y-6 pb-16 animate-fade-in max-w-6xl mx-auto">
-      {/* Header Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Question Bank</h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Store, filter, and practice your syllabus questions and old question papers.
+          <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
+            <HelpCircle className="w-5 h-5 text-[#5b5bd6]" />
+            <span>Question Bank</span>
+          </h1>
+          <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
+            Cloud archives for Multiple Choice Questions and Subjective/Long Question papers.
           </p>
         </div>
 
-        {/* Quick Action Buttons */}
-        <div className="flex items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Upload className="w-4 h-4" />}
-            onClick={() => setIsUploadModalOpen(true)}
-          >
-            Upload PDF
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setIsManualModalOpen(true)}
-          >
-            Add Question
-          </Button>
-        </div>
-      </div>
-
-      {/* Filter Toolbar */}
-      <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-          {/* Target Filter */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              Course / Target
-            </label>
-            <select
-              value={selectedTargetId}
-              onChange={e => {
-                setSelectedTargetId(e.target.value);
-                setSelectedTopicId('');
-              }}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">All Courses ({targets.length})</option>
-              {targets.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Topic Filter */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              Syllabus Topic
-            </label>
-            <select
-              value={selectedTopicId}
-              onChange={e => setSelectedTopicId(e.target.value)}
-              disabled={!selectedTargetId}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
-            >
-              <option value="">All Topics ({topics.length})</option>
-              {topics.map(top => (
-                <option key={top.id} value={top.id}>{top.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Difficulty Filter */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              Difficulty
-            </label>
-            <select
-              value={difficultyFilter}
-              onChange={e => setDifficultyFilter(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="all">All Difficulties</option>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-          </div>
-
-          {/* Keyword Search */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-              Search
-            </label>
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search MCQs..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white placeholder-slate-400"
-              />
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Questions Count Summary */}
-      <div className="flex items-center justify-between text-xs text-slate-500 px-1">
-        <span>Showing <strong>{questions.length}</strong> questions in Question Bank</span>
-        {questions.length > 0 && onNavigate && (
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Play className="w-3.5 h-3.5 text-brand-600" />}
-            onClick={() => onNavigate('practice', { targetId: selectedTargetId || undefined, topicId: selectedTopicId || undefined })}
-          >
-            Practice Filtered Set →
-          </Button>
-        )}
-      </div>
-
-      {/* Questions List */}
-      {questions.length === 0 ? (
-        <Card className="p-12 text-center border-dashed border-2 border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-slate-900/50">
-          <FileText className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">No questions found</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-            Upload a PDF old question set or add your first question manually.
-          </p>
-          <Button variant="primary" size="sm" onClick={() => setIsUploadModalOpen(true)}>
-            Upload Question PDF
-          </Button>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {questions.map((q, index) => {
-            const isRevealed = revealedAnswers[q.id] || false;
-            const targetObj = targets.find(t => t.id === q.targetId);
-
-            return (
-              <Card
-                key={q.id}
-                className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:border-brand-300 dark:hover:border-brand-800 transition-all space-y-4"
+        {/* Action Buttons */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {activeTab === 'mcq' ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-white dark:bg-[#181d2f] text-xs font-bold border-[#e2e8f0] dark:border-[#2b334d] text-[#5b5bd6]"
+                leftIcon={<Plus className="w-3.5 h-3.5" />}
+                onClick={() => setIsManualMcqModalOpen(true)}
+                disabled={!selectedCourseId}
               >
-                {/* Meta Header */}
-                <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800/80 pb-2.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{index + 1}</span>
-                    <Badge variant={q.difficulty === 'hard' ? 'danger' : q.difficulty === 'medium' ? 'warning' : 'success'} size="sm">
-                      {q.difficulty}
-                    </Badge>
-                    {targetObj && (
-                      <span className="text-xs text-slate-500 font-medium">
-                        {targetObj.name}
-                      </span>
-                    )}
-                    {q.source && (
-                      <span className="text-[11px] text-slate-400">
-                        • {q.source}
-                      </span>
-                    )}
+                + Add Single MCQ
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold text-xs"
+                leftIcon={<Upload className="w-3.5 h-3.5" />}
+                onClick={() => setIsUploadMcqModalOpen(true)}
+                disabled={!selectedCourseId}
+              >
+                Upload MCQ PDF
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="primary"
+              size="sm"
+              className="bg-[#0284c7] hover:bg-[#0369a1] text-white font-bold text-xs"
+              leftIcon={<Upload className="w-3.5 h-3.5" />}
+              onClick={() => setIsUploadSubjectiveModalOpen(true)}
+              disabled={!selectedCourseId}
+            >
+              Upload Subjective Paper
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Tabs: MCQ QUESTIONS vs SUBJECTIVE PAPERS */}
+      <div className="flex items-center gap-2 border-b border-[#e2e8f0] dark:border-[#23293d] pb-2">
+        <button
+          onClick={() => { setActiveTab('mcq'); setCurrentPage(1); }}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'mcq'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+          }`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          <span>MCQ Questions</span>
+        </button>
+
+        <button
+          onClick={() => { setActiveTab('subjective'); }}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'subjective'
+              ? 'bg-[#0284c7] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Subjective / Long Questions</span>
+        </button>
+      </div>
+
+      {/* Course Collection Summary Cards (Requirement 32) */}
+      {!selectedCourseId ? (
+        <div className="space-y-4">
+          <h2 className="text-xs font-bold text-[#64748b] uppercase tracking-wider">
+            Select Course Collection
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {courses.map(c => {
+              const mcqCount = courseMcqCounts[c.id] || 0;
+              const subCount = courseSubCounts[c.id] || 0;
+              return (
+                <Card
+                  key={c.id}
+                  className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4 hover:border-[#5b5bd6]/50 transition-all"
+                >
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="text-base font-extrabold text-[#172033] dark:text-[#f8f9fc]">{c.name}</h3>
+                      {c.year && (
+                        <span className="text-[11px] font-bold text-[#5b5bd6]">Exam Year {c.year}</span>
+                      )}
+                    </div>
+                    <span
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{ backgroundColor: c.color || '#5b5bd6' }}
+                    />
                   </div>
 
-                  <button
-                    onClick={() => handleDeleteQuestion(q.id)}
-                    className="text-slate-400 hover:text-rose-500 transition-colors p-1"
-                    title="Delete Question"
+                  <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
+                    <div className="p-2.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                      <span className="text-[10px] font-bold text-[#64748b] uppercase">MCQs</span>
+                      <p className="text-base font-extrabold text-[#5b5bd6]">{mcqCount}</p>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d]">
+                      <span className="text-[10px] font-bold text-[#64748b] uppercase">Subjective</span>
+                      <p className="text-base font-extrabold text-[#0284c7]">{subCount} Files</p>
+                    </div>
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="w-full font-bold bg-[#5b5bd6] text-white"
+                    onClick={() => setSelectedCourseId(c.id)}
                   >
-                    <Trash2 className="w-4 h-4" />
+                    Open Collection
+                  </Button>
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* Active Collection Opened View with Filters (Requirement 33) */
+        <div className="space-y-5">
+          {/* Active Filter Bar */}
+          <Card className="p-4 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSelectedCourseId('')}
+                  className="text-xs font-bold text-[#5b5bd6] hover:underline flex items-center gap-1"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>All Collections</span>
+                </button>
+                <span className="text-[#cbd5e1]">|</span>
+                <span className="text-xs font-bold text-[#172033] dark:text-white">
+                  {courses.find(c => c.id === selectedCourseId)?.name}
+                </span>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative w-full md:w-64">
+                <Search className="w-3.5 h-3.5 text-[#94a3b8] absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Search questions or keywords..."
+                  className="w-full pl-9 pr-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
+                />
+              </div>
+            </div>
+
+            {/* Filter Dropdowns */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+              <select
+                value={selectedCourseId}
+                onChange={e => setSelectedCourseId(e.target.value)}
+                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
+              >
+                {courses.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedSubjectId}
+                onChange={e => setSelectedSubjectId(e.target.value)}
+                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
+              >
+                <option value="">All Subjects</option>
+                {subjects.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedTopicId}
+                onChange={e => setSelectedTopicId(e.target.value)}
+                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
+              >
+                <option value="">All Topics</option>
+                {topics.map(t => (
+                  <option key={t.id} value={t.id}>{t.code ? `${t.code}. ` : ''}{t.name}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedYear || ''}
+                onChange={e => setSelectedYear(e.target.value ? parseInt(e.target.value) : undefined)}
+                className="px-3 py-1.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
+              >
+                <option value="">All Years</option>
+                <option value="2027">2027</option>
+                <option value="2026">2026</option>
+                <option value="2025">2025</option>
+              </select>
+            </div>
+          </Card>
+
+          {/* TAB 1: MCQ QUESTIONS LIST (Paginated, Hidden answers until click) */}
+          {activeTab === 'mcq' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
+                <span>Showing {mcqList.length} of {totalMcqs} MCQs</span>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate('practice', { courseId: selectedCourseId })}
+                    className="text-[#5b5bd6] hover:underline"
+                  >
+                    Go to Practice →
                   </button>
-                </div>
+                )}
+              </div>
 
-                {/* Question Text */}
-                <h4 className="text-sm font-semibold text-slate-900 dark:text-white leading-relaxed">
-                  {q.questionText}
-                </h4>
-
-                {/* 4 Options Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {q.options.map(opt => {
-                    const isCorrect = isRevealed && opt.id === q.correctOptionId;
-
+              {mcqList.length > 0 ? (
+                <div className="space-y-3">
+                  {mcqList.map((q, idx) => {
+                    const isRevealed = revealedAnswers[q.id];
                     return (
-                      <div
-                        key={opt.id}
-                        className={`p-3 rounded-xl border text-xs flex items-center gap-3 transition-all ${
-                          isCorrect
-                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-900 dark:text-emerald-200 font-semibold ring-1 ring-emerald-500'
-                            : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-                        }`}
+                      <Card
+                        key={q.id}
+                        className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3"
                       >
-                        <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
-                          isCorrect
-                            ? 'bg-emerald-500 text-white'
-                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600'
-                        }`}>
-                          {opt.id}
-                        </span>
-                        <span className="flex-1 leading-snug">{opt.text}</span>
-                        {isCorrect && <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />}
-                      </div>
+                        <div className="flex items-start justify-between gap-3">
+                          <h4 className="font-bold text-xs sm:text-sm text-[#172033] dark:text-[#f8f9fc] leading-snug">
+                            <span className="text-[#5b5bd6] font-mono mr-1">
+                              {(currentPage - 1) * pageSize + idx + 1}.
+                            </span>
+                            {q.question_text}
+                          </h4>
+
+                          <button
+                            onClick={() => toggleAnswerReveal(q.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#5b5bd6] hover:bg-[#eef2f6]"
+                          >
+                            {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                            <span>{isRevealed ? 'Hide Answer' : 'View Answer'}</span>
+                          </button>
+                        </div>
+
+                        {/* Options A, B, C, D */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'A' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
+                            <span className="font-bold text-[#5b5bd6] mr-1.5">A.</span> {q.option_a}
+                          </div>
+                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'B' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
+                            <span className="font-bold text-[#5b5bd6] mr-1.5">B.</span> {q.option_b}
+                          </div>
+                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'C' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
+                            <span className="font-bold text-[#5b5bd6] mr-1.5">C.</span> {q.option_c}
+                          </div>
+                          <div className={`p-2 rounded-xl border ${isRevealed && q.correct_answer === 'D' ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500 font-bold text-emerald-700 dark:text-emerald-300' : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#334155] dark:text-[#cbd5e1]'}`}>
+                            <span className="font-bold text-[#5b5bd6] mr-1.5">D.</span> {q.option_d}
+                          </div>
+                        </div>
+
+                        {/* Revealed Explanation */}
+                        {isRevealed && (
+                          <div className="p-3 rounded-xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-xs space-y-1 animate-fade-in">
+                            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                              Correct Answer: Option {q.correct_answer || 'UNKNOWN'}
+                            </span>
+                            {q.explanation && (
+                              <p className="text-[#64748b] dark:text-[#9496a8]">{q.explanation}</p>
+                            )}
+                          </div>
+                        )}
+                      </Card>
                     );
                   })}
-                </div>
 
-                {/* Answer Reveal Toggle */}
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100 dark:border-slate-800/80">
-                  <button
-                    type="button"
-                    onClick={() => toggleAnswerReveal(q.id)}
-                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-600 dark:text-brand-400 hover:underline"
-                  >
-                    {isRevealed ? (
-                      <>
-                        <EyeOff className="w-3.5 h-3.5" />
-                        <span>Hide Answer</span>
-                      </>
-                    ) : (
-                      <>
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>View Answer</span>
-                      </>
-                    )}
-                  </button>
-
-                  {isRevealed && (
-                    <div className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">
-                      Correct: Option {q.correctOptionId || 'Unknown'}
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-center gap-2 pt-4">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        leftIcon={<ChevronLeft className="w-3.5 h-3.5" />}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-xs font-bold text-[#64748b] px-3">
+                        Page {currentPage} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={currentPage >= totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        rightIcon={<ChevronRight className="w-3.5 h-3.5" />}
+                      >
+                        Next
+                      </Button>
                     </div>
                   )}
                 </div>
+              ) : (
+                <Card className="p-8 text-center text-xs text-[#64748b]">
+                  <p>No MCQ questions found in this collection.</p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="mt-3 bg-[#5b5bd6] text-white font-bold"
+                    onClick={() => setIsUploadMcqModalOpen(true)}
+                  >
+                    Upload MCQ PDF
+                  </Button>
+                </Card>
+              )}
+            </div>
+          )}
 
-                {/* Explanation (Shown when answer revealed) */}
-                {isRevealed && q.explanation && (
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300">
-                    <span className="font-bold text-slate-900 dark:text-white">Explanation: </span>
-                    {q.explanation}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
+          {/* TAB 2: SUBJECTIVE / LONG QUESTIONS ARCHIVE (Requirement 38, 39) */}
+          {activeTab === 'subjective' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-bold text-[#64748b]">
+                <span>{subjectiveList.length} Subjective Papers Archived</span>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="bg-[#0284c7] hover:bg-[#0369a1] text-white font-bold text-xs"
+                  leftIcon={<Plus className="w-3.5 h-3.5" />}
+                  onClick={() => setIsUploadSubjectiveModalOpen(true)}
+                >
+                  + Upload Paper
+                </Button>
+              </div>
 
-      {/* ================= MODAL 1: UPLOAD PDF / TEXT ================= */}
-      <Modal
-        isOpen={isUploadModalOpen}
-        onClose={() => setIsUploadModalOpen(false)}
-        title="Upload Questions (PDF or Document)"
-      >
-        <div className="space-y-4">
-          <p className="text-xs text-slate-500">
-            Select course and syllabus topic, then drop your PDF. All detected MCQs will be directly stored in your bank.
-          </p>
+              {subjectiveList.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {subjectiveList.map(paper => (
+                    <Card
+                      key={paper.id}
+                      className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3 flex flex-col justify-between"
+                    >
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Badge variant="brand" size="sm">Year {paper.year || 2027}</Badge>
+                          <FileText className="w-4 h-4 text-[#0284c7]" />
+                        </div>
+                        <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc] line-clamp-2">
+                          {paper.paper_title}
+                        </h4>
+                        <p className="text-[11px] text-[#64748b] truncate">{paper.file_name}</p>
+                      </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Select Course / Target *
-            </label>
-            <select
-              value={selectedTargetId}
-              onChange={e => setSelectedTargetId(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">Select a Course</option>
-              {targets.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Assign to Syllabus Topic (Optional)
-            </label>
-            <select
-              value={uploadTopicId}
-              onChange={e => setUploadTopicId(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            >
-              <option value="">General / All Syllabus Topics</option>
-              {uploadTargetTopics.map(top => (
-                <option key={top.id} value={top.id}>{top.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* File Drag / Select Box */}
-          <div className="border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-6 text-center hover:border-brand-500 transition-all bg-slate-50/50 dark:bg-slate-900/50">
-            <input
-              type="file"
-              accept=".pdf,.txt,.json,.csv"
-              onChange={handleFileUpload}
-              className="hidden"
-              id="file-upload-input"
-              disabled={isExtracting || !selectedTargetId}
-            />
-            <label htmlFor="file-upload-input" className={`cursor-pointer ${!selectedTargetId ? 'opacity-50 pointer-events-none' : ''}`}>
-              <Upload className="w-10 h-10 text-brand-600 mx-auto mb-2" />
-              <p className="text-xs font-bold text-slate-900 dark:text-white">
-                {isExtracting ? extractingStage : 'Click to Upload PDF or Old Question Sheet'}
-              </p>
-              <p className="text-[11px] text-slate-400 mt-1">Supports standard PDFs, text files, and scanned question papers</p>
-            </label>
-          </div>
-
-          {isExtracting && (
-            <div className="p-3.5 rounded-xl bg-brand-50 dark:bg-brand-950/40 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 text-xs flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-brand-600 border-t-transparent rounded-full animate-spin shrink-0" />
-              <span>{extractingStage}</span>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        className="w-full font-bold bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs"
+                        leftIcon={<ExternalLink className="w-3.5 h-3.5" />}
+                        onClick={() => handleViewSubjectivePaper(paper)}
+                      >
+                        View Paper Securely
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
+              ) : (
+                <Card className="p-8 text-center text-xs text-[#64748b]">
+                  <p>No subjective or long question papers archived for this course yet.</p>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="mt-3 bg-[#0284c7] text-white font-bold"
+                    onClick={() => setIsUploadSubjectiveModalOpen(true)}
+                  >
+                    Upload First Subjective Paper
+                  </Button>
+                </Card>
+              )}
             </div>
           )}
         </div>
-      </Modal>
+      )}
 
-      {/* ================= MODAL 2: UPLOAD SUCCESS & 1-CLICK PRACTICE ================= */}
-      <Modal
-        isOpen={isUploadSuccessModalOpen}
-        onClose={() => setIsUploadSuccessModalOpen(false)}
-        title="✓ Upload Successful — Questions Added"
-      >
-        {uploadStats && (
-          <div className="space-y-6 text-center py-2 animate-fade-in">
-            <div className="w-14 h-14 rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
-              <CheckCircle2 className="w-8 h-8" />
+      {/* ================= MODAL: LARGE UPLOAD SUMMARY (Requirement 35, 36) ================= */}
+      {uploadSummary && (
+        <Modal
+          isOpen={true}
+          onClose={() => setUploadSummary(null)}
+          title="Upload Summary"
+          size="md"
+        >
+          <div className="space-y-5 text-center text-[#172033] dark:text-[#f8f9fc]">
+            <div className="w-14 h-14 rounded-full bg-[#f4fbf7] dark:bg-[#122820] text-emerald-600 border border-emerald-500/30 flex items-center justify-center mx-auto text-xl font-bold">
+              ✓
             </div>
 
             <div className="space-y-1">
-              <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">
-                {uploadStats.savedCount} Questions Successfully Added!
+              <h3 className="text-lg font-bold text-[#172033] dark:text-white">
+                {uploadSummary.savedCount} MCQs Added Successfully
               </h3>
-              <p className="text-xs text-slate-500">
-                {uploadStats.answersMapped} answers accurately mapped • Stored directly in your Question Bank
+              <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                Course: {uploadSummary.courseName} · Year: {uploadSummary.year}
               </p>
             </div>
 
-            {uploadStats.needsReviewCount > 0 && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between">
-                <span>⚠ {uploadStats.needsReviewCount} questions need manual review</span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setIsUploadSuccessModalOpen(false);
-                    setIsReviewProblemModalOpen(true);
-                  }}
-                >
-                  Review {uploadStats.needsReviewCount} Questions
-                </Button>
+            {uploadSummary.uncertainCount > 0 && (
+              <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                ⚠ {uploadSummary.uncertainCount} questions need review due to missing options or answers.
               </div>
             )}
 
-            {/* Instant Practice Launchers */}
-            <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-800">
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider block mb-3">
-                Ready for Practice — Choose Session Size:
-              </span>
-
-              <div className="grid grid-cols-3 gap-2.5">
-                <Button
-                  variant="primary"
-                  className="font-bold py-3 text-xs"
-                  onClick={() => handleStartPracticeTest(15)}
-                >
-                  Practice 15
-                </Button>
-                <Button
-                  variant="primary"
-                  className="font-bold py-3 text-xs"
-                  onClick={() => handleStartPracticeTest(25)}
-                >
-                  Practice 25
-                </Button>
-                <Button
-                  variant="primary"
-                  className="font-bold py-3 text-xs"
-                  onClick={() => handleStartPracticeTest(50)}
-                >
-                  Practice 50
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center pt-2">
+            <div className="flex items-center justify-center gap-3 pt-3">
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => {
-                  setIsUploadSuccessModalOpen(false);
-                  if (onNavigate) onNavigate('practice', { targetId: uploadStats.targetId });
-                }}
+                onClick={() => setUploadSummary(null)}
               >
-                Custom Practice Setup →
+                Close
               </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setIsUploadSuccessModalOpen(false)}
-              >
-                View Question Bank
-              </Button>
+              {onNavigate && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="bg-[#5b5bd6] text-white font-bold"
+                  onClick={() => {
+                    setUploadSummary(null);
+                    onNavigate('practice', { courseId: selectedCourseId });
+                  }}
+                >
+                  Go to Practice →
+                </Button>
+              )}
             </div>
           </div>
-        )}
+        </Modal>
+      )}
+
+      {/* ================= MODAL: UPLOAD MCQ PDF ================= */}
+      <Modal
+        isOpen={isUploadMcqModalOpen}
+        onClose={() => setIsUploadMcqModalOpen(false)}
+        title="Upload MCQ PDF"
+        size="md"
+      >
+        <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+          <p className="text-xs text-[#64748b]">
+            Upload a past question paper or practice PDF. The parser will extract all questions, map options A/B/C/D, and save valid questions directly into the database.
+          </p>
+
+          <div className="border-2 border-dashed border-[#cbd5e1] dark:border-[#2b334d] rounded-2xl p-6 text-center space-y-2">
+            <Upload className="w-8 h-8 text-[#5b5bd6] mx-auto animate-bounce" />
+            <p className="text-xs font-bold">Select Question PDF</p>
+            <input
+              type="file"
+              accept=".pdf"
+              onChange={handleMcqFileUpload}
+              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#5b5bd6]/10 file:text-[#5b5bd6] cursor-pointer"
+            />
+          </div>
+        </div>
       </Modal>
 
-      {/* ================= MODAL 3: MANUAL ADD QUESTION ================= */}
+      {/* ================= MODAL: ADD MANUAL MCQ ================= */}
       <Modal
-        isOpen={isManualModalOpen}
-        onClose={() => setIsManualModalOpen(false)}
-        title="Add Question Manually"
+        isOpen={isManualMcqModalOpen}
+        onClose={() => setIsManualMcqModalOpen(false)}
+        title="Add Single MCQ"
+        size="md"
       >
-        <form onSubmit={handleSaveManual} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Course / Target *
-            </label>
+        <form onSubmit={handleSaveManualMcq} className="space-y-3.5 text-[#172033] dark:text-[#f8f9fc]">
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Question Text *</label>
+            <textarea
+              value={manualText}
+              onChange={e => setManualText(e.target.value)}
+              placeholder="Type the question..."
+              required
+              className="w-full h-16 px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none resize-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <input
+              type="text"
+              placeholder="Option A *"
+              value={manualA}
+              onChange={e => setManualA(e.target.value)}
+              required
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Option B *"
+              value={manualB}
+              onChange={e => setManualB(e.target.value)}
+              required
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Option C *"
+              value={manualC}
+              onChange={e => setManualC(e.target.value)}
+              required
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+            />
+            <input
+              type="text"
+              placeholder="Option D *"
+              value={manualD}
+              onChange={e => setManualD(e.target.value)}
+              required
+              className="px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Correct Option</label>
             <select
-              value={selectedTargetId}
-              onChange={e => setSelectedTargetId(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+              value={manualCorrect}
+              onChange={e => setManualCorrect(e.target.value as any)}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold outline-none"
             >
-              {targets.map(t => (
-                <option key={t.id} value={t.id}>{t.name}</option>
-              ))}
+              <option value="A">Option A</option>
+              <option value="B">Option B</option>
+              <option value="C">Option C</option>
+              <option value="D">Option D</option>
             </select>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              Question Text *
-            </label>
-            <textarea
-              rows={2}
-              required
-              value={questionText}
-              onChange={e => setQuestionText(e.target.value)}
-              placeholder="Enter full MCQ question statement..."
-              className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
-            />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setIsManualMcqModalOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="primary" size="sm" className="bg-[#5b5bd6] text-white font-bold">Save MCQ</Button>
           </div>
+        </form>
+      </Modal>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Option A *</label>
-              <input
-                type="text"
-                required
-                value={optionA}
-                onChange={e => setOptionA(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Option B *</label>
-              <input
-                type="text"
-                required
-                value={optionB}
-                onChange={e => setOptionB(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Option C *</label>
-              <input
-                type="text"
-                required
-                value={optionC}
-                onChange={e => setOptionC(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Option D *</label>
-              <input
-                type="text"
-                required
-                value={optionD}
-                onChange={e => setOptionD(e.target.value)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Correct Answer *</label>
-              <select
-                value={correctOption}
-                onChange={e => setCorrectOption(e.target.value as any)}
-                className="w-full px-3 py-1.5 text-xs font-bold rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              >
-                <option value="A">Option A</option>
-                <option value="B">Option B</option>
-                <option value="C">Option C</option>
-                <option value="D">Option D</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-500 mb-1">Difficulty</label>
-              <select
-                value={difficulty}
-                onChange={e => setDifficulty(e.target.value as any)}
-                className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
-              >
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Explanation (Optional)</label>
+      {/* ================= MODAL: UPLOAD SUBJECTIVE PAPER ================= */}
+      <Modal
+        isOpen={isUploadSubjectiveModalOpen}
+        onClose={() => setIsUploadSubjectiveModalOpen(false)}
+        title="Upload Subjective / Long Question Paper"
+        size="md"
+      >
+        <form onSubmit={handleUploadSubjective} className="space-y-3.5 text-[#172033] dark:text-[#f8f9fc]">
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Paper Title *</label>
             <input
               type="text"
-              value={explanation}
-              onChange={e => setExplanation(e.target.value)}
-              placeholder="Why is this answer correct?"
-              className="w-full px-3 py-1.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+              value={subTitle}
+              onChange={e => setSubTitle(e.target.value)}
+              placeholder="e.g. 2027 RBB Level 5 Banking Subjective Question"
+              required
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button variant="outline" size="sm" type="button" onClick={() => setIsManualModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Save Question
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Exam / Paper Year</label>
+            <input
+              type="number"
+              value={subYear}
+              onChange={e => setSubYear(parseInt(e.target.value) || 2027)}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Question Document File (PDF/Image) *</label>
+            <input
+              type="file"
+              required
+              onChange={e => setSubFile(e.target.files?.[0] || null)}
+              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-[#0284c7]/10 file:text-[#0284c7] cursor-pointer"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold">Solution Document (Optional)</label>
+            <input
+              type="file"
+              onChange={e => setSubSolutionFile(e.target.files?.[0] || null)}
+              className="block w-full text-xs text-[#64748b] file:mr-4 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:bg-[#64748b]/10 file:text-[#64748b] cursor-pointer"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={() => setIsUploadSubjectiveModalOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="primary" size="sm" disabled={isUploadingSub} className="bg-[#0284c7] text-white font-bold">
+              {isUploadingSub ? 'Uploading...' : 'Save Paper'}
             </Button>
           </div>
         </form>

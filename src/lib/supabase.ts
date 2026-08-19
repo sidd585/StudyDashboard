@@ -6,7 +6,6 @@ const procEnv = typeof process !== 'undefined' ? process.env || {} : {};
 function sanitizeConfigVal(val: any): string {
   if (typeof val !== 'string') return '';
   let clean = val.replace(/[\r\n\t]/g, '').replace(/^['"]+|['"]+$/g, '').trim();
-  // Strip accidental key prefixes if the entire line was copied
   if (clean.includes('=')) {
     clean = clean.split('=').pop()?.trim() || clean;
   }
@@ -39,9 +38,9 @@ export const supabase = createClient(supabaseUrl, supabasePublishableKey, {
   }
 });
 
-// Types for Cloud Entities
-export type ApplicationRole = 'MAIN_ADMIN' | 'SUB_ADMIN' | 'USER';
-export type AccountStatus = 'ACTIVE' | 'DEACTIVATED' | 'PENDING';
+// User Roles & Account Status
+export type ApplicationRole = 'MAIN_ADMIN' | 'SUB_ADMIN' | 'USER' | 'FRIEND';
+export type AccountStatus = 'ACTIVE' | 'DEACTIVATED' | 'PENDING' | 'PENDING_APPROVAL';
 export type AnswerStatus = 'VALID' | 'UNCERTAIN' | 'SAMPLE';
 
 export interface Profile {
@@ -51,6 +50,7 @@ export interface Profile {
   role: ApplicationRole;
   managed_by?: string | null;
   status: AccountStatus;
+  visible_to_sub_admin?: boolean;
   daily_goal_minutes: number;
   timezone: string;
   avatar_url?: string;
@@ -63,6 +63,7 @@ export interface CloudCourse {
   user_id: string;
   name: string;
   description?: string;
+  year?: number;
   daily_goal_minutes: number;
   color: string;
   is_sample: boolean;
@@ -71,10 +72,23 @@ export interface CloudCourse {
   updated_at: string;
 }
 
+export interface CloudSubject {
+  id: string;
+  user_id: string;
+  course_id: string;
+  name: string;
+  description?: string;
+  code?: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CloudTopic {
   id: string;
   user_id: string;
   course_id: string;
+  subject_id?: string | null;
   parent_topic_id?: string | null;
   code?: string;
   name: string;
@@ -82,10 +96,23 @@ export interface CloudTopic {
   created_at: string;
 }
 
+export interface CloudSyllabusDocument {
+  id: string;
+  user_id: string;
+  course_id: string;
+  subject_id?: string | null;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  parsed_sections?: any;
+  created_at: string;
+}
+
 export interface CloudQuestion {
   id: string;
   user_id: string;
   course_id: string;
+  subject_id?: string | null;
   topic_id?: string | null;
   subtopic_id?: string | null;
   question_text: string;
@@ -93,9 +120,10 @@ export interface CloudQuestion {
   option_b: string;
   option_c: string;
   option_d: string;
-  correct_answer?: string | null;
+  correct_answer?: string | null; // 'A' | 'B' | 'C' | 'D' | 'UNKNOWN'
   answer_status: AnswerStatus;
   explanation?: string | null;
+  year?: number;
   source_file_id?: string;
   source_page?: number;
   original_question_number?: number;
@@ -104,11 +132,30 @@ export interface CloudQuestion {
   updated_at: string;
 }
 
+export interface CloudSubjectivePaper {
+  id: string;
+  user_id: string;
+  course_id: string;
+  subject_id?: string | null;
+  topic_id?: string | null;
+  paper_title: string;
+  year?: number;
+  file_path: string;
+  file_name: string;
+  file_size: number;
+  solution_path?: string | null;
+  is_shared_friend?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CloudStudySession {
   id: string;
   user_id: string;
   course_id: string;
+  subject_id?: string | null;
   topic_id?: string | null;
+  lesson_id?: string | null;
   started_at: string;
   ended_at?: string | null;
   paused_milliseconds: number;
@@ -123,6 +170,7 @@ export interface CloudPracticeSession {
   id: string;
   user_id: string;
   course_id: string;
+  subject_id?: string | null;
   mode: 'PRACTICE' | 'TIMED';
   question_ids: string[];
   started_at: string;
@@ -135,16 +183,31 @@ export interface CloudPracticeSession {
   created_at: string;
 }
 
+export interface CloudPracticeAnswer {
+  id: string;
+  practice_session_id: string;
+  user_id: string;
+  question_id: string;
+  selected_option: string | null;
+  is_correct: boolean;
+  answered_at: string;
+  marked_for_review?: boolean;
+}
+
 export interface CloudPlannerSession {
   id: string;
   user_id: string;
   course_id: string;
+  subject_id?: string | null;
   topic_id?: string | null;
+  lesson_id?: string | null;
   title: string;
+  date?: string;
   start_time: string;
   end_time?: string | null;
   duration_minutes: number;
   reminder_enabled: boolean;
+  reminder_minutes_before?: number;
   is_completed: boolean;
   created_at: string;
 }
@@ -159,18 +222,14 @@ export interface CloudStudyRelationship {
   created_at: string;
 }
 
-export const USER_PROFILES = {
-  siddhartha: {
-    id: '11111111-1111-1111-1111-111111111111',
-    name: 'Siddhartha',
-    email: 'siddhartha@studydashboard.local',
-    avatarUrl: '/avatars/panda.png',
-  },
-  shilpa: {
-    id: '22222222-2222-2222-2222-222222222222',
-    name: 'Shilpa',
-    email: 'shilpa@studydashboard.local',
-    avatarUrl: '/avatars/whale.png',
-  }
-};
-
+export interface CloudEmailPreferences {
+  id: string;
+  user_id: string;
+  daily_report_enabled: boolean;
+  daily_report_time: string;
+  study_reminders_enabled: boolean;
+  reminder_minutes_before: number;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}

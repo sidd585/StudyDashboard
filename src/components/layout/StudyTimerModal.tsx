@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../../db';
 import { useUser } from '../../context/UserContext';
-import { useStudyTimer } from '../../context/StudyTimerContext';
+import { useStudyTimer, formatSecondsToTime } from '../../context/StudyTimerContext';
+import { courseService } from '../../services/courseService';
+import type { CloudCourse, CloudSubject, CloudTopic } from '../../lib/supabase';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import {
@@ -11,14 +11,13 @@ import {
   Square,
   Star,
   Clock,
-  Sparkles,
-  AlertCircle,
   BookOpen,
+  CheckCircle2,
 } from 'lucide-react';
 import type { StudyActivityType } from '../../types';
 
 interface StudyTimerModalProps {
-  onNavigatePractice?: (targetId: string) => void;
+  onNavigatePractice?: (courseId: string) => void;
 }
 
 export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePractice }) => {
@@ -28,10 +27,13 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
     isRunning,
     isPaused,
     formattedTime,
-    activeTargetId,
-    activeTargetName,
+    elapsedSeconds,
+    activeCourseId,
+    activeCourseName,
+    activeSubjectName,
+    activeTopicName,
+    activeLessonName,
     isModalOpen,
-    isLongSession,
     startSession,
     pauseTimer,
     resumeTimer,
@@ -39,15 +41,15 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
     closeModal,
   } = useStudyTimer();
 
-  // User targets
-  const targets = useLiveQuery(
-    () => db.targets.where('userId').equals(currentUser.id).and(t => !t.isArchived).toArray(),
-    [currentUser.id]
-  ) || [];
+  const [courses, setCourses] = useState<CloudCourse[]>([]);
+  const [subjects, setSubjects] = useState<CloudSubject[]>([]);
+  const [topics, setTopics] = useState<CloudTopic[]>([]);
+  const [lessons, setLessons] = useState<CloudTopic[]>([]);
 
-  const [selectedTargetId, setSelectedTargetId] = useState<string>('');
+  const [selectedCourseId, setSelectedCourseId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
   const [selectedTopicId, setSelectedTopicId] = useState<string>('');
+  const [selectedLessonId, setSelectedLessonId] = useState<string>('');
   const [activityType, setActivityType] = useState<StudyActivityType>('Reading');
 
   // Finish session state
@@ -56,26 +58,89 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
   const [completionNotes, setCompletionNotes] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const subjects = useLiveQuery(
-    () => (selectedTargetId ? db.subjects.where('targetId').equals(selectedTargetId).toArray() : []),
-    [selectedTargetId]
-  ) || [];
-
-  const topics = useLiveQuery(
-    () => (selectedSubjectId ? db.topics.where('subjectId').equals(selectedSubjectId).toArray() : []),
-    [selectedSubjectId]
-  ) || [];
-
-  // Default target selection
+  // Load courses
   useEffect(() => {
-    if (!selectedTargetId && targets.length > 0) {
-      setSelectedTargetId(targets[0].id);
+    async function loadCourses() {
+      try {
+        const loaded = await courseService.getCourses();
+        setCourses(loaded);
+        if (loaded.length > 0 && !selectedCourseId) {
+          setSelectedCourseId(loaded[0].id);
+        }
+      } catch (err) {
+        console.error('Error loading courses in timer:', err);
+      }
     }
-  }, [targets, selectedTargetId]);
+    if (isModalOpen) {
+      loadCourses();
+    }
+  }, [isModalOpen, currentUser.id]);
+
+  // Load subjects when course changes
+  useEffect(() => {
+    async function loadSubjects() {
+      if (!selectedCourseId) {
+        setSubjects([]);
+        setSelectedSubjectId('');
+        return;
+      }
+      const loaded = await courseService.getSubjects(selectedCourseId);
+      setSubjects(loaded);
+      if (loaded.length > 0) {
+        setSelectedSubjectId(loaded[0].id);
+      } else {
+        setSelectedSubjectId('');
+      }
+    }
+    loadSubjects();
+  }, [selectedCourseId]);
+
+  // Load topics when subject/course changes
+  useEffect(() => {
+    async function loadTopics() {
+      if (!selectedCourseId) {
+        setTopics([]);
+        setSelectedTopicId('');
+        return;
+      }
+      const allTopics = await courseService.getTopics(selectedCourseId, selectedSubjectId || undefined);
+      // Top level topics have parent_topic_id === null
+      const topTopics = allTopics.filter(t => !t.parent_topic_id);
+      setTopics(topTopics);
+      if (topTopics.length > 0) {
+        setSelectedTopicId(topTopics[0].id);
+      } else {
+        setSelectedTopicId('');
+      }
+    }
+    loadTopics();
+  }, [selectedCourseId, selectedSubjectId]);
+
+  // Load child lessons when parent topic changes
+  useEffect(() => {
+    async function loadLessons() {
+      if (!selectedCourseId || !selectedTopicId) {
+        setLessons([]);
+        setSelectedLessonId('');
+        return;
+      }
+      const allTopics = await courseService.getTopics(selectedCourseId);
+      const childLessons = allTopics.filter(t => t.parent_topic_id === selectedTopicId);
+      setLessons(childLessons);
+      setSelectedLessonId('');
+    }
+    loadLessons();
+  }, [selectedCourseId, selectedTopicId]);
 
   const handleStart = async () => {
-    if (!selectedTargetId) return;
-    await startSession(selectedTargetId, selectedSubjectId || undefined, activityType);
+    if (!selectedCourseId) return;
+    await startSession(
+      selectedCourseId,
+      selectedSubjectId || null,
+      selectedTopicId || null,
+      selectedLessonId || null,
+      activityType
+    );
   };
 
   const handleFinishPrompt = () => {
@@ -86,13 +151,13 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
   const handleConfirmSave = async (andPractice: boolean = false) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
-    const targetToPractice = activeTargetId || selectedTargetId;
+    const courseToPractice = activeCourseId || selectedCourseId;
     try {
       await stopTimer(focusRating, completionNotes);
       setIsFinishing(false);
       setCompletionNotes('');
-      if (andPractice && onNavigatePractice && targetToPractice) {
-        onNavigatePractice(targetToPractice);
+      if (andPractice && onNavigatePractice && courseToPractice) {
+        onNavigatePractice(courseToPractice);
       }
     } finally {
       setIsSubmitting(false);
@@ -117,243 +182,250 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
         isFinishing
           ? 'Finish Focus Session'
           : hasActiveSession
-          ? `Focus Session: ${activeTargetName || 'Target'}`
+          ? `Focus Session: ${activeCourseName || 'Course'}`
           : 'Start Focus Session'
       }
       size="md"
     >
-      <div className="space-y-6">
-        {/* CASE 1: Finishing Celebration & Review Screen */}
+      <div className="space-y-6 text-[#172033] dark:text-[#f8f9fc]">
+        {/* CASE 1: Finishing Review & Save */}
         {isFinishing ? (
           <div className="space-y-5 animate-fade-in">
-            <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-brand-500/10 to-slate-900 rounded-2xl border border-emerald-500/30 text-center space-y-1">
-              <span className="text-xl">🎉</span>
-              <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                Great work! Session Completed.
+            <div className="p-4 bg-[#f4fbf7] dark:bg-[#122820] rounded-2xl border border-emerald-500/30 text-center space-y-1">
+              <span className="text-2xl">🎉</span>
+              <h3 className="text-base font-bold text-[#172033] dark:text-white">
+                Session Completed!
               </h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                You focused on <strong className="text-slate-900 dark:text-white">{activeTargetName}</strong> for{' '}
-                <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{formattedTime}</strong>
+              <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+                You focused on <strong className="text-[#172033] dark:text-white">{activeCourseName}</strong> for{' '}
+                <strong className="text-emerald-600 dark:text-emerald-400 font-mono font-bold text-sm">{formattedTime}</strong>
               </p>
-              <div className="text-[11px] text-slate-400 pt-1">
+              {activeTopicName && (
+                <p className="text-[11px] text-[#5b5bd6] dark:text-[#8282ea] font-semibold">
+                  Topic: {activeTopicName}
+                </p>
+              )}
+              <div className="text-[11px] text-[#64748b] pt-1">
                 Started at {startTimeDisplay}
               </div>
             </div>
 
             {/* Focus Rating */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2 text-center">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1] mb-2 text-center">
                 How focused were you? (1–5 Stars)
               </label>
-              <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-center gap-2 p-3 bg-[#f8fafc] dark:bg-[#181d2f] rounded-xl border border-[#e2e8f0] dark:border-[#23293d]">
                 {[1, 2, 3, 4, 5].map(rating => (
                   <button
                     key={rating}
                     type="button"
                     onClick={() => setFocusRating(rating)}
-                    className={`p-2 rounded-xl transition-all ${
-                      focusRating >= rating
-                        ? 'text-amber-500 bg-amber-500/20 scale-105'
-                        : 'text-slate-400 dark:text-slate-600 hover:text-slate-500'
-                    }`}
+                    className="p-1.5 transition-transform hover:scale-110 focus:outline-none"
                   >
-                    <Star className="w-6 h-6 fill-current" />
+                    <Star
+                      className={`w-7 h-7 transition-colors ${
+                        rating <= focusRating
+                          ? 'fill-amber-400 text-amber-400 drop-shadow-sm'
+                          : 'text-[#cbd5e1] dark:text-slate-700'
+                      }`}
+                    />
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Optional Notes */}
+            {/* Completion Note */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                What did you complete? (Optional Notes)
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1] mb-1.5">
+                Study Note (Optional)
               </label>
               <textarea
                 value={completionNotes}
                 onChange={e => setCompletionNotes(e.target.value)}
-                placeholder="e.g. Completed Chapter 4, reviewed 25 past questions..."
-                rows={2}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                placeholder="What topics or questions did you cover in this session?"
+                className="w-full h-20 px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] focus:border-[#5b5bd6] outline-none resize-none transition-colors"
               />
             </div>
 
             {/* Action Buttons */}
-            <div className="space-y-2 pt-2">
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-white dark:bg-[#181d2f] text-[#64748b]"
+                onClick={() => setIsFinishing(false)}
+                disabled={isSubmitting}
+              >
+                Resume
+              </Button>
               <Button
                 variant="primary"
-                className="w-full"
+                size="sm"
+                className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
+                onClick={() => handleConfirmSave(false)}
                 disabled={isSubmitting}
-                leftIcon={<BookOpen className="w-4 h-4" />}
-                onClick={() => handleConfirmSave(true)}
               >
-                {isSubmitting ? 'Saving...' : 'Practice This Topic Now'}
+                {isSubmitting ? 'Saving...' : 'Save Session'}
               </Button>
-
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    setIsFinishing(false);
-                    resumeTimer();
-                  }}
-                >
-                  Resume Timer
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="flex-1"
-                  disabled={isSubmitting}
-                  onClick={() => handleConfirmSave(false)}
-                >
-                  Finish & Save
-                </Button>
-              </div>
             </div>
           </div>
         ) : hasActiveSession ? (
-          /* CASE 2: Active Stopwatch Screen (Running or Paused) */
-          <div className="text-center space-y-6 py-3 animate-fade-in">
-            {isLongSession && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>This session has been active for over 6 hours.</span>
+          /* CASE 2: Active Session Screen */
+          <div className="space-y-6 animate-fade-in text-center">
+            {/* Header info */}
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6] dark:text-[#8282ea] text-xs font-bold">
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>{activeCourseName || 'Course'}</span>
               </div>
-            )}
-
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/30 text-brand-600 dark:text-brand-400 text-xs font-semibold">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Target: {activeTargetName}</span>
+              {activeSubjectName && (
+                <p className="text-xs text-[#64748b] dark:text-[#9496a8] font-medium">{activeSubjectName}</p>
+              )}
+              {activeTopicName && (
+                <p className="text-xs font-semibold text-[#172033] dark:text-white">
+                  Topic: {activeTopicName} {activeLessonName ? `· ${activeLessonName}` : ''}
+                </p>
+              )}
             </div>
 
-            <div className="py-2">
-              <div className="text-6xl font-mono font-extrabold tracking-tight text-slate-900 dark:text-white select-none">
+            {/* Big Timer Display */}
+            <div className="p-8 rounded-2xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] shadow-inner">
+              <div className="font-mono text-5xl sm:text-6xl font-black tracking-tight text-[#172033] dark:text-white">
                 {formattedTime}
               </div>
-              <p className="text-xs text-slate-500 mt-2 flex items-center justify-center gap-1.5">
-                <Clock className="w-3.5 h-3.5" />
-                <span>{isPaused ? '❚❚ Timer Paused' : '● Timer Running in Background'}</span>
-              </p>
+              <div className="mt-3 flex items-center justify-center gap-2">
+                <span className={`w-2.5 h-2.5 rounded-full ${isRunning ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'}`} />
+                <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">
+                  {isRunning ? 'Focused & Tracking' : 'Session Paused'}
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center justify-center gap-3">
-              {isPaused ? (
+            {/* Controls */}
+            <div className="flex items-center justify-center gap-3 pt-2">
+              {isRunning ? (
                 <Button
-                  variant="success"
+                  variant="outline"
                   size="md"
-                  leftIcon={<Play className="w-4 h-4 fill-current" />}
-                  onClick={resumeTimer}
-                  className="px-6"
+                  className="bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-bold"
+                  leftIcon={<Pause className="w-4 h-4 fill-current" />}
+                  onClick={pauseTimer}
                 >
-                  Resume
+                  Pause
                 </Button>
               ) : (
                 <Button
-                  variant="secondary"
+                  variant="primary"
                   size="md"
-                  leftIcon={<Pause className="w-4 h-4" />}
-                  onClick={pauseTimer}
-                  className="px-6"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                  leftIcon={<Play className="w-4 h-4 fill-current" />}
+                  onClick={resumeTimer}
                 >
-                  Pause
+                  Resume
                 </Button>
               )}
 
               <Button
-                variant="danger"
+                variant="primary"
                 size="md"
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
                 leftIcon={<Square className="w-4 h-4 fill-current" />}
                 onClick={handleFinishPrompt}
-                className="px-6"
               >
                 Finish Session
               </Button>
             </div>
-
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
-              <p className="text-[11px] text-slate-400">
-                You can close (✕) this popup and study freely. The timer continues running in the header.
-              </p>
-            </div>
           </div>
         ) : (
-          /* CASE 3: Start Focus Session Configuration */
+          /* CASE 3: Start New Focus Form */
           <div className="space-y-4 animate-fade-in">
-            {/* 1. Target Selector */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                1. Select Target
+            {/* 1. Course */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                Select Course
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {targets.map(target => (
-                  <button
-                    key={target.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedTargetId(target.id);
-                      setSelectedSubjectId('');
-                      setSelectedTopicId('');
-                    }}
-                    className={`p-3 rounded-xl border text-left transition-all ${
-                      selectedTargetId === target.id
-                        ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-slate-900 dark:text-white ring-1 ring-brand-500'
-                        : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300 text-slate-700 dark:text-slate-300'
-                    }`}
-                  >
-                    <p className="text-xs font-bold truncate">{target.name}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{target.dailyGoalMinutes ? `${target.dailyGoalMinutes}m daily goal` : 'Active Target'}</p>
-                  </button>
+              <select
+                value={selectedCourseId}
+                onChange={e => setSelectedCourseId(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+              >
+                {courses.length === 0 && <option value="">No courses created yet</option>}
+                {courses.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} {c.year ? `(${c.year})` : ''}
+                  </option>
                 ))}
-              </div>
+              </select>
             </div>
 
-            {/* 2. Subject & Topic Selection */}
+            {/* 2. Subject / Paper */}
             {subjects.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-                    Subject (Optional)
-                  </label>
-                  <select
-                    value={selectedSubjectId}
-                    onChange={e => {
-                      setSelectedSubjectId(e.target.value);
-                      setSelectedTopicId('');
-                    }}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                  >
-                    <option value="">All Subjects</option>
-                    {subjects.map(s => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {topics.length > 0 && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-                      Topic (Optional)
-                    </label>
-                    <select
-                      value={selectedTopicId}
-                      onChange={e => setSelectedTopicId(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                    >
-                      <option value="">All Topics</option>
-                      {topics.map(tp => (
-                        <option key={tp.id} value={tp.id}>{tp.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                  Select Subject / Paper
+                </label>
+                <select
+                  value={selectedSubjectId}
+                  onChange={e => setSelectedSubjectId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                >
+                  <option value="">All Subjects / General</option>
+                  {subjects.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 
-            {/* 3. Activity Type */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-                Activity Type
+            {/* 3. Topic */}
+            {topics.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                  Select Topic
+                </label>
+                <select
+                  value={selectedTopicId}
+                  onChange={e => setSelectedTopicId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                >
+                  <option value="">Whole Subject / General</option>
+                  {topics.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.code ? `${t.code}. ` : ''}{t.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 4. Lesson (Optional) */}
+            {lessons.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                  Select Lesson (Optional)
+                </label>
+                <select
+                  value={selectedLessonId}
+                  onChange={e => setSelectedLessonId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#172033] dark:text-[#f8f9fc] font-semibold outline-none focus:border-[#5b5bd6]"
+                >
+                  <option value="">All Lessons in Topic</option>
+                  {lessons.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.code ? `${l.code} ` : ''}{l.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 5. Activity Type */}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                Activity
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {(['Reading', 'MCQ Practice', 'Revision'] as StudyActivityType[]).map(act => (
@@ -361,10 +433,10 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
                     key={act}
                     type="button"
                     onClick={() => setActivityType(act)}
-                    className={`py-2 px-3 rounded-xl border text-xs font-semibold transition-all ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all ${
                       activityType === act
-                        ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400'
-                        : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                        ? 'bg-[#5b5bd6] text-white shadow-xs'
+                        : 'bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] text-[#64748b] hover:text-[#172033] dark:hover:text-white'
                     }`}
                   >
                     {act}
@@ -373,14 +445,15 @@ export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePrac
               </div>
             </div>
 
+            {/* Submit */}
             <div className="pt-3">
               <Button
                 variant="primary"
                 size="lg"
-                className="w-full"
-                leftIcon={<Play className="w-4 h-4 fill-current" />}
-                disabled={!selectedTargetId}
+                className="w-full font-bold bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white shadow-sm"
+                leftIcon={<Play className="w-4 h-4 fill-white" />}
                 onClick={handleStart}
+                disabled={!selectedCourseId}
               >
                 Start Focus Session
               </Button>

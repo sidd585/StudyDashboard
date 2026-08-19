@@ -1,5 +1,4 @@
 import { db } from './index';
-import { USER_PROFILES } from '../lib/supabase';
 import type {
   Target,
   Subject,
@@ -31,7 +30,8 @@ export async function seedNepalInitialData(force = false) {
   const todayStr = format(new Date(), 'yyyy-MM-dd');
 
   // 1. SEED SIDDHARTHA TARGETS
-  const user1Id = USER_PROFILES.siddhartha.id;
+  const user1Id = '00000000-0000-0000-0000-000000000001';
+  const user2Id = '00000000-0000-0000-0000-000000000002';
   const user1Targets: Target[] = [
     {
       id: 'target-u1-rbbit',
@@ -79,8 +79,7 @@ export async function seedNepalInitialData(force = false) {
     }
   ];
 
-  // 2. SEED SHILPA TARGETS
-  const user2Id = USER_PROFILES.shilpa.id;
+  // 2. SEED SECOND USER TARGETS
   const user2Targets: Target[] = [
     {
       id: 'target-u2-sanstha',

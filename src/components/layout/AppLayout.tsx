@@ -18,13 +18,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   studyStreak = 1,
 }) => {
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col lg:flex-row antialiased selection:bg-brand-500 selection:text-white">
+    <div className="min-h-screen bg-[#f4f6fa] dark:bg-[#0d0f18] text-[#172033] dark:text-[#f8f9fc] flex flex-col lg:flex-row antialiased selection:bg-[#5b5bd6] selection:text-white transition-colors">
       {/* Desktop Sidebar */}
       <Sidebar currentPage={currentPage} onNavigate={onNavigate} />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 pb-16 lg:pb-0">
-        <Header currentPage={currentPage} studyStreak={studyStreak} />
+        <Header currentPage={currentPage} onNavigate={onNavigate} studyStreak={studyStreak} />
 
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto">
           {children}
@@ -36,7 +36,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
       {/* Global Study Timer Modal */}
       <StudyTimerModal
-        onNavigatePractice={(targetId) => onNavigate('practice', { targetId })}
+        onNavigatePractice={(courseId) => onNavigate('practice', { courseId })}
       />
     </div>
   );

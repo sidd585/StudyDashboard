@@ -1,12 +1,20 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
-import { supabase, type Profile, type ApplicationRole } from '../lib/supabase';
+import { supabase, type Profile, type ApplicationRole, type AccountStatus } from '../lib/supabase';
+
+export const MAIN_ADMIN_EMAILS = [
+  'sid.paudel585@gmail.com',
+  'siddharthapaudel585@gmail.com',
+  'siddhartha@studydashboard.local',
+];
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
   profile: Profile | null;
   role: ApplicationRole;
+  status: AccountStatus;
+  isApproved: boolean;
   isLoading: boolean;
   signIn: (email: string, password: string, rememberMe?: boolean) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, displayName: string, dailyGoalMinutes?: number) => Promise<{ error: string | null }>;
@@ -24,7 +32,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Fetch full cloud profile from public.profiles
+  // Fetch cloud profile from public.profiles
   const fetchProfile = useCallback(async (userId: string, userEmail: string) => {
     try {
       const { data, error } = await supabase
@@ -40,8 +48,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data) {
         setProfile(data as Profile);
       } else {
-        const cleanEmail = userEmail.toLowerCase();
-        const role: ApplicationRole = cleanEmail === 'sid.paudel585@gmail.com' ? 'MAIN_ADMIN' : 'USER';
+        const cleanEmail = userEmail.toLowerCase().trim();
+        const isSuperAdminEmail = MAIN_ADMIN_EMAILS.includes(cleanEmail);
+        const role: ApplicationRole = isSuperAdminEmail ? 'MAIN_ADMIN' : 'USER';
+        const status: AccountStatus = isSuperAdminEmail ? 'ACTIVE' : 'PENDING_APPROVAL';
         const avatar = cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png';
         const displayName = cleanEmail.split('@')[0];
 
@@ -50,7 +60,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: cleanEmail,
           display_name: displayName.charAt(0).toUpperCase() + displayName.slice(1),
           role,
-          status: 'ACTIVE',
+          status,
+          visible_to_sub_admin: true,
           daily_goal_minutes: 120,
           timezone: 'Asia/Kathmandu',
           avatar_url: avatar,
@@ -70,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             setProfile(initialProfile);
           }
-        } catch (e) {
+        } catch {
           setProfile(initialProfile);
         }
       }
@@ -115,9 +126,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string, password: string, rememberMe = true) => {
     try {
-      if (!rememberMe) {
-        // Session storage or standard
-      }
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
@@ -151,8 +159,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        // Direct profile initialization
-        const role = cleanEmail === 'sid.paudel585@gmail.com' ? 'MAIN_ADMIN' : 'USER';
+        const isSuperAdminEmail = MAIN_ADMIN_EMAILS.includes(cleanEmail);
+        const role: ApplicationRole = isSuperAdminEmail ? 'MAIN_ADMIN' : 'USER';
+        const status: AccountStatus = isSuperAdminEmail ? 'ACTIVE' : 'PENDING_APPROVAL';
         const avatar = cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png';
 
         try {
@@ -161,13 +170,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             email: cleanEmail,
             display_name: displayName.trim() || cleanEmail.split('@')[0],
             role,
-            status: 'ACTIVE',
+            status,
+            visible_to_sub_admin: true,
             daily_goal_minutes: dailyGoalMinutes,
             timezone: 'Asia/Kathmandu',
             avatar_url: avatar,
           }, { onConflict: 'id' });
         } catch (profileErr) {
-          console.warn('Profile direct creation note:', profileErr);
+          console.warn('Profile creation note:', profileErr);
         }
 
         await fetchProfile(data.user.id, data.user.email ?? '');
@@ -216,6 +226,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const role: ApplicationRole = profile?.role || 'USER';
+  const status: AccountStatus = profile?.status || 'PENDING_APPROVAL';
+  const isApproved: boolean = status === 'ACTIVE' || role === 'MAIN_ADMIN';
 
   return (
     <AuthContext.Provider
@@ -224,6 +236,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         role,
+        status,
+        isApproved,
         isLoading,
         signIn,
         signUp,

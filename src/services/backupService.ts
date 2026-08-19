@@ -149,21 +149,21 @@ export async function restoreBackupData(jsonString: string, mode: 'overwrite' | 
 
 export function exportQuestionsToCSV(questions: Question[]): string {
   const headers = ['Question', 'Option A', 'Option B', 'Option C', 'Option D', 'Correct Answer', 'Difficulty', 'Explanation', 'Source', 'Year'];
-  const rows = questions.map(q => {
-    const optA = q.options.find(o => o.id === 'A')?.text || '';
-    const optB = q.options.find(o => o.id === 'B')?.text || '';
-    const optC = q.options.find(o => o.id === 'C')?.text || '';
-    const optD = q.options.find(o => o.id === 'D')?.text || '';
+  const rows = questions.map((q: any) => {
+    const optA = q.options?.find((o: any) => o.id === 'A')?.text || q.option_a || '';
+    const optB = q.options?.find((o: any) => o.id === 'B')?.text || q.option_b || '';
+    const optC = q.options?.find((o: any) => o.id === 'C')?.text || q.option_c || '';
+    const optD = q.options?.find((o: any) => o.id === 'D')?.text || q.option_d || '';
     const escape = (str: string) => `"${(str || '').replace(/"/g, '""')}"`;
 
     return [
-      escape(q.questionText),
+      escape(q.questionText || q.question_text),
       escape(optA),
       escape(optB),
       escape(optC),
       escape(optD),
-      escape(q.correctOptionId || ''),
-      escape(q.difficulty),
+      escape(q.correctOptionId || q.correct_answer || ''),
+      escape(q.difficulty || 'medium'),
       escape(q.explanation || ''),
       escape(q.source || ''),
       q.year ? String(q.year) : '',

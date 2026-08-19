@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import type { ApplicationRole } from '../lib/supabase';
+import { useUser } from '../context/UserContext';
+import type { ApplicationRole, AccountStatus } from '../lib/supabase';
 import { adminService, type AdminUserListItem, type AdminOverviewStats } from '../services/adminService';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
+import { Modal } from '../components/common/Modal';
 import {
   ShieldAlert,
   Users,
@@ -16,38 +18,53 @@ import {
   CheckCircle2,
   XCircle,
   RotateCcw,
+  EyeOff,
+  Eye,
+  HeartHandshake,
+  Trash2,
 } from 'lucide-react';
 
 export const Admin: React.FC = () => {
-  const { user, role } = useAuth();
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'invitations' | 'friends'>('overview');
+  const { user } = useAuth();
+  const { isMainAdmin, isSubAdmin, refreshFriendStatus } = useUser();
+
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'pending' | 'subadmins' | 'friend'>('overview');
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'USER' | 'SUB_ADMIN'>('USER');
-  const [inviteLoading, setInviteLoading] = useState(false);
-  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
 
-  const isMainAdmin = role === 'MAIN_ADMIN';
-  const isSubAdmin = role === 'SUB_ADMIN';
+  // Admin Friend Selection State (Requirement 61)
+  const [selectedFriendUserId, setSelectedFriendUserId] = useState<string>('');
+  const [activeFriendName, setActiveFriendName] = useState<string | null>(null);
+  const [friendSaveStatus, setFriendSaveStatus] = useState<string | null>(null);
+
+  // Reset User Modal State
+  const [resetModalUser, setResetModalUser] = useState<AdminUserListItem | null>(null);
+  const [resetType, setResetType] = useState<'PROGRESS_ONLY' | 'FULL_STUDY_DATA'>('PROGRESS_ONLY');
+  const [resetConfirmText, setResetConfirmText] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [userList, statData] = await Promise.all([
+      const [userList, statData, currentFriend] = await Promise.all([
         adminService.getUsers(),
         adminService.getOverviewStats(),
+        adminService.getActiveAdminFriend(),
       ]);
 
-      // Sub-admins only see users assigned to them
+      // Scoped view for Sub-Admin
       if (isSubAdmin && user) {
-        setUsers(userList.filter(u => u.managedBy === user.id));
+        setUsers(userList.filter(u => u.managedBy === user.id && u.visibleToSubAdmin));
       } else {
         setUsers(userList);
       }
+
       setStats(statData);
+      if (currentFriend) {
+        setSelectedFriendUserId(currentFriend.userId);
+        setActiveFriendName(currentFriend.displayName);
+      }
     } catch (e) {
       console.error('Error loading admin data:', e);
     } finally {
@@ -57,10 +74,18 @@ export const Admin: React.FC = () => {
 
   useEffect(() => {
     loadData();
-  }, [role, user]);
+  }, [isMainAdmin, isSubAdmin, user?.id]);
 
-  const handleToggleStatus = async (userId: string, currentStatus: string) => {
-    const nextStatus = currentStatus === 'ACTIVE' ? 'DEACTIVATED' : 'ACTIVE';
+  // Actions
+  const handleApproveUser = async (userId: string, role: ApplicationRole = 'USER') => {
+    const success = await adminService.approveUser(userId, role, isSubAdmin ? user?.id : undefined);
+    if (success) {
+      loadData();
+    }
+  };
+
+  const handleToggleStatus = async (userId: string, currentStatus: AccountStatus) => {
+    const nextStatus: AccountStatus = currentStatus === 'ACTIVE' ? 'DEACTIVATED' : 'ACTIVE';
     const success = await adminService.toggleUserStatus(userId, nextStatus);
     if (success) {
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, status: nextStatus } : u));
@@ -74,209 +99,273 @@ export const Admin: React.FC = () => {
     }
   };
 
-  const handleSendInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail) return;
+  const handleToggleMainAdminOnly = async (userId: string, currentVisibleToSub: boolean) => {
+    const nextPrivate = currentVisibleToSub;
+    const success = await adminService.toggleMainAdminOnly(userId, nextPrivate);
+    if (success) {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, visibleToSubAdmin: !nextPrivate } : u));
+    }
+  };
 
-    setInviteLoading(true);
-    setInviteMessage(null);
-
-    const managedBy = isSubAdmin ? user?.id : undefined;
-    const res = await adminService.inviteUser(inviteEmail, isSubAdmin ? 'USER' : inviteRole, managedBy);
-
-    if (res.success) {
-      setInviteMessage(`Invitation successfully registered for ${inviteEmail}`);
-      setInviteEmail('');
-      setTimeout(() => setShowInviteModal(false), 2000);
+  // Save Admin Friend Selection
+  const handleSaveAdminFriend = async () => {
+    if (!selectedFriendUserId) return;
+    const success = await adminService.setAdminFriend(selectedFriendUserId);
+    if (success) {
+      await refreshFriendStatus();
+      setFriendSaveStatus('Admin Friend active! Study Together room is now enabled for both of you.');
+      setTimeout(() => setFriendSaveStatus(null), 4000);
       loadData();
     } else {
-      setInviteMessage(res.error || 'Failed to send invitation.');
+      alert('Failed to set Admin Friend.');
     }
-    setInviteLoading(false);
   };
+
+  // Execute User Reset
+  const handleExecuteReset = async () => {
+    if (!resetModalUser || resetConfirmText !== 'RESET') return;
+    setIsResetting(true);
+    try {
+      const success = await adminService.resetUserData(resetModalUser.id, resetType);
+      if (success) {
+        alert(`Successfully reset ${resetType === 'PROGRESS_ONLY' ? 'progress' : 'all study data'} for ${resetModalUser.displayName}.`);
+        setResetModalUser(null);
+        setResetConfirmText('');
+      } else {
+        alert('Failed to reset user data.');
+      }
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const pendingUsers = users.filter(u => u.status === 'PENDING_APPROVAL' || u.status === 'PENDING');
+  const subAdminList = users.filter(u => u.role === 'SUB_ADMIN');
 
   if (!isMainAdmin && !isSubAdmin) {
     return (
       <div className="p-8 max-w-lg mx-auto text-center space-y-3">
         <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto" />
-        <h2 className="text-xl font-bold text-[#101828] dark:text-[#f8f9fc]">Access Restricted</h2>
-        <p className="text-xs text-[#667085] dark:text-[#9496a8]">
-          This console is reserved for Siddhartha (Main Admin) and authorized Sub-Admins.
+        <h2 className="text-xl font-bold text-[#172033] dark:text-[#f8f9fc]">Access Restricted</h2>
+        <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+          This console is reserved for the Super Admin and authorized Sub-Admins.
         </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in">
-      {/* HEADER */}
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-[#101828] dark:text-[#f8f9fc]">
-              {isMainAdmin ? 'Main Admin Console' : 'Sub-Admin Workspace'}
+            <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight">
+              {isMainAdmin ? 'Super Admin Console' : 'Sub-Admin Workspace'}
             </h1>
             <Badge variant={isMainAdmin ? 'brand' : 'neutral'} size="sm">
-              {role}
+              {isMainAdmin ? 'MAIN ADMIN' : 'SUB ADMIN'}
             </Badge>
           </div>
-          <p className="text-xs text-[#667085] dark:text-[#9496a8] mt-0.5">
+          <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
             {isMainAdmin
-              ? 'Manage study accounts, sub-admins, friend permissions, and invitations.'
-              : 'Manage assigned study users and register invitations.'}
+              ? 'User approvals, role assignments, Sub-Admin delegation, and Admin Friend management.'
+              : 'Manage assigned study users and approve pending registrations.'}
           </p>
         </div>
-
-        <Button
-          variant="primary"
-          size="sm"
-          className="bg-[#7f56d9] hover:bg-[#6941c6] text-white font-bold self-start"
-          leftIcon={<UserPlus className="w-4 h-4" />}
-          onClick={() => setShowInviteModal(true)}
-        >
-          Invite User
-        </Button>
       </div>
 
-      {/* TABS */}
-      <div className="flex items-center gap-2 border-b border-[#eaecf0] dark:border-[#23293d] pb-2">
+      {/* Tabs */}
+      <div className="flex items-center gap-2 border-b border-[#e2e8f0] dark:border-[#23293d] pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
             activeTab === 'overview'
-              ? 'bg-[#f4ebff] text-[#6941c6] dark:bg-[#2c1c5f] dark:text-[#d6bbfb]'
-              : 'text-[#667085] hover:text-[#101828]'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
           }`}
         >
           Overview
         </button>
+
         <button
           onClick={() => setActiveTab('users')}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
             activeTab === 'users'
-              ? 'bg-[#f4ebff] text-[#6941c6] dark:bg-[#2c1c5f] dark:text-[#d6bbfb]'
-              : 'text-[#667085] hover:text-[#101828]'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
           }`}
         >
-          Users ({users.length})
+          All Users ({users.length})
         </button>
+
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+            activeTab === 'pending'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+          }`}
+        >
+          <span>Pending Approvals</span>
+          {pendingUsers.length > 0 && (
+            <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-black">
+              {pendingUsers.length}
+            </span>
+          )}
+        </button>
+
+        {isMainAdmin && (
+          <>
+            <button
+              onClick={() => setActiveTab('subadmins')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
+                activeTab === 'subadmins'
+                  ? 'bg-[#5b5bd6] text-white shadow-xs'
+                  : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+              }`}
+            >
+              Sub-Admins ({subAdminList.length})
+            </button>
+
+            <button
+              onClick={() => setActiveTab('friend')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'friend'
+                  ? 'bg-[#12b76a] text-white shadow-xs'
+                  : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+              }`}
+            >
+              <HeartHandshake className="w-3.5 h-3.5" />
+              <span>Admin Friend</span>
+            </button>
+          </>
+        )}
       </div>
 
-      {/* TAB CONTENT */}
-      {activeTab === 'overview' && stats && (
+      {/* TAB 1: OVERVIEW (Requirement 58) */}
+      {activeTab === 'overview' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="p-4 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d]">
-              <div className="flex items-center justify-between text-xs text-[#667085] font-semibold">
-                <span>Total Users</span>
-                <Users className="w-4 h-4 text-[#7f56d9]" />
-              </div>
-              <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc] mt-1.5">
-                {stats.totalUsers}
-              </div>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Total Registered Users</span>
+              <p className="text-2xl font-extrabold text-[#172033] dark:text-white mt-1">{stats?.totalUsers || 0}</p>
             </Card>
 
-            <Card className="p-4 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d]">
-              <div className="flex items-center justify-between text-xs text-[#667085] font-semibold">
-                <span>Active Accounts</span>
-                <CheckCircle2 className="w-4 h-4 text-[#12b76a]" />
-              </div>
-              <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc] mt-1.5">
-                {stats.activeUsers}
-              </div>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Active Users</span>
+              <p className="text-2xl font-extrabold text-[#12b76a] mt-1">{stats?.activeUsers || 0}</p>
             </Card>
 
-            <Card className="p-4 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d]">
-              <div className="flex items-center justify-between text-xs text-[#667085] font-semibold">
-                <span>Sub-Admins</span>
-                <ShieldAlert className="w-4 h-4 text-[#0284c7]" />
-              </div>
-              <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc] mt-1.5">
-                {stats.subAdmins}
-              </div>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Pending Approval</span>
+              <p className="text-2xl font-extrabold text-amber-500 mt-1">{stats?.pendingApprovals || 0}</p>
             </Card>
 
-            <Card className="p-4 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d]">
-              <div className="flex items-center justify-between text-xs text-[#667085] font-semibold">
-                <span>Today Active</span>
-                <Clock className="w-4 h-4 text-[#f79009]" />
-              </div>
-              <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc] mt-1.5">
-                {stats.todayActiveStudents}
-              </div>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Admin Friend Status</span>
+              <p className="text-sm font-extrabold text-[#5b5bd6] mt-2 truncate">
+                {stats?.activeAdminFriend ? `Connected (${stats.activeAdminFriend})` : 'Not Selected'}
+              </p>
             </Card>
           </div>
         </div>
       )}
 
+      {/* TAB 2: USERS TABLE (Requirement 59, 60) */}
       {activeTab === 'users' && (
-        <Card className="p-0 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d] overflow-hidden">
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#f8f9fc] dark:bg-[#181d2f] text-[#344054] dark:text-[#eceef2] font-bold border-b border-[#eaecf0] dark:border-[#23293d]">
-                <tr>
-                  <th className="py-3 px-4">Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Role & Access</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Joined</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
+            <table className="w-full text-xs text-left">
+              <thead>
+                <tr className="border-b border-[#e2e8f0] dark:border-[#23293d] text-[#64748b] uppercase">
+                  <th className="pb-3 font-bold">User</th>
+                  <th className="pb-3 font-bold">Role</th>
+                  <th className="pb-3 font-bold">Status</th>
+                  {isMainAdmin && <th className="pb-3 font-bold">Sub-Admin Visibility</th>}
+                  <th className="pb-3 font-bold text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#eaecf0] dark:divide-[#23293d]">
-                {users.map((u) => (
-                  <tr key={u.id} className="hover:bg-[#f9fafb] dark:hover:bg-[#181d2f]/50">
-                    <td className="py-3 px-4 font-bold text-[#101828] dark:text-[#f8f9fc]">
-                      {u.displayName}
+              <tbody className="divide-y divide-[#e2e8f0] dark:divide-[#23293d]">
+                {users.map(u => (
+                  <tr key={u.id} className="hover:bg-[#f8fafc] dark:hover:bg-[#181d2f]/60 transition-colors">
+                    <td className="py-3">
+                      <p className="font-bold text-[#172033] dark:text-[#f8f9fc]">{u.displayName}</p>
+                      <p className="text-[11px] text-[#64748b]">{u.email}</p>
                     </td>
-                    <td className="py-3 px-4">{u.email}</td>
-                    <td className="py-3 px-4">
-                      {isMainAdmin && u.email !== 'sid.paudel585@gmail.com' ? (
+                    <td className="py-3">
+                      {isMainAdmin && u.role !== 'MAIN_ADMIN' ? (
                         <select
                           value={u.role}
-                          onChange={(e) => handleUpdateRole(u.id, e.target.value as ApplicationRole)}
-                          className="px-2.5 py-1 rounded-lg text-xs font-bold border border-[#eaecf0] dark:border-[#23293d] bg-[#f8f9fc] dark:bg-[#181d2f] text-[#101828] dark:text-[#f8f9fc] outline-none cursor-pointer focus:border-[#7f56d9]"
+                          onChange={e => handleUpdateRole(u.id, e.target.value as ApplicationRole)}
+                          className="px-2 py-1 rounded-lg text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-semibold outline-none"
                         >
-                          <option value="USER">USER (Student)</option>
-                          <option value="SUB_ADMIN">SUB_ADMIN (Manager)</option>
-                          <option value="MAIN_ADMIN">MAIN_ADMIN (Superuser)</option>
+                          <option value="USER">USER</option>
+                          <option value="FRIEND">FRIEND</option>
+                          <option value="SUB_ADMIN">SUB_ADMIN</option>
                         </select>
                       ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                          u.role === 'MAIN_ADMIN'
-                            ? 'bg-[#f4ebff] text-[#6941c6]'
-                            : u.role === 'SUB_ADMIN'
-                            ? 'bg-[#f0f9ff] text-[#0284c7]'
-                            : 'bg-slate-100 dark:bg-slate-800 text-[#344054] dark:text-[#eceef2]'
-                        }`}>
-                          {u.role}
-                        </span>
+                        <Badge variant="neutral" size="sm">{u.role}</Badge>
                       )}
                     </td>
-                    <td className="py-3 px-4">
-                      <span className={`inline-flex items-center gap-1 font-semibold ${
-                        u.status === 'ACTIVE' ? 'text-[#12b76a]' : 'text-rose-500'
+                    <td className="py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        u.status === 'ACTIVE'
+                          ? 'bg-emerald-500/10 text-emerald-600'
+                          : u.status === 'PENDING_APPROVAL'
+                          ? 'bg-amber-500/10 text-amber-600'
+                          : 'bg-rose-500/10 text-rose-600'
                       }`}>
-                        {u.status === 'ACTIVE' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
-                        <span>{u.status}</span>
+                        {u.status}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
-                      {new Date(u.createdAt).toLocaleDateString()}
-                    </td>
-                    <td className="py-3 px-4 text-right space-x-2">
-                      {u.email !== 'sid.paudel585@gmail.com' && (
+                    {isMainAdmin && (
+                      <td className="py-3">
                         <button
-                          onClick={() => handleToggleStatus(u.id, u.status)}
-                          className={`px-2.5 py-1 rounded-md text-[11px] font-bold ${
-                            u.status === 'ACTIVE'
-                              ? 'bg-rose-50 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300'
-                              : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300'
+                          onClick={() => handleToggleMainAdminOnly(u.id, u.visibleToSubAdmin)}
+                          className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border ${
+                            u.visibleToSubAdmin
+                              ? 'text-[#64748b] border-[#e2e8f0] dark:border-[#2b334d]'
+                              : 'text-amber-600 bg-amber-500/10 border-amber-500/30'
                           }`}
                         >
-                          {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                          {u.visibleToSubAdmin ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                          <span>{u.visibleToSubAdmin ? 'Visible to Sub-Admins' : 'Main Admin Only'}</span>
                         </button>
-                      )}
+                      </td>
+                    )}
+                    <td className="py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {u.status === 'PENDING_APPROVAL' && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold px-2.5 py-1"
+                            onClick={() => handleApproveUser(u.id, 'USER')}
+                          >
+                            Approve
+                          </Button>
+                        )}
+                        {u.role !== 'MAIN_ADMIN' && (
+                          <>
+                            <button
+                              onClick={() => handleToggleStatus(u.id, u.status)}
+                              className="text-xs font-semibold text-[#64748b] hover:text-[#172033] p-1"
+                            >
+                              {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setResetModalUser(u);
+                                setResetConfirmText('');
+                              }}
+                              className="text-xs font-semibold text-rose-600 hover:underline p-1"
+                            >
+                              Reset Data
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -286,72 +375,202 @@ export const Admin: React.FC = () => {
         </Card>
       )}
 
-      {/* INVITE MODAL */}
-      {showInviteModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md p-6 bg-white dark:bg-[#141824] border-[#eaecf0] dark:border-[#23293d] shadow-lg space-y-4">
-            <h3 className="text-base font-bold text-[#101828] dark:text-[#f8f9fc]">
-              Invite New User
-            </h3>
+      {/* TAB 3: PENDING APPROVALS */}
+      {activeTab === 'pending' && (
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+          <h2 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Pending User Registrations</h2>
+          {pendingUsers.length > 0 ? (
+            <div className="space-y-3">
+              {pendingUsers.map(u => (
+                <div
+                  key={u.id}
+                  className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#181d2f] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc]">{u.displayName}</h4>
+                    <p className="text-xs text-[#64748b]">{u.email}</p>
+                    <span className="text-[10px] text-amber-600 font-semibold">Registered & waiting for approval</span>
+                  </div>
 
-            {inviteMessage && (
-              <div className="p-3 rounded-xl bg-[#f4ebff] dark:bg-[#2c1c5f] text-[#6941c6] dark:text-[#d6bbfb] text-xs font-semibold">
-                {inviteMessage}
-              </div>
-            )}
-
-            <form onSubmit={handleSendInvite} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-[#344054] dark:text-[#eceef2]">
-                  Recipient Email
-                </label>
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="student@example.com"
-                  required
-                  className="w-full px-3.5 py-2 rounded-xl text-sm border border-[#d0d5dd] dark:border-[#344054] bg-white dark:bg-[#1a1f30] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#7f56d9]"
-                />
-              </div>
-
-              {isMainAdmin && (
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-[#344054] dark:text-[#eceef2]">
-                    Role
-                  </label>
-                  <select
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value as any)}
-                    className="w-full px-3.5 py-2 rounded-xl text-sm border border-[#d0d5dd] dark:border-[#344054] bg-white dark:bg-[#1a1f30] text-[#101828] dark:text-[#f8f9fc] outline-none"
-                  >
-                    <option value="USER">Normal Student (USER)</option>
-                    <option value="SUB_ADMIN">Sub Admin (SUB_ADMIN)</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="bg-emerald-600 text-white font-bold"
+                      onClick={() => handleApproveUser(u.id, 'USER')}
+                    >
+                      Approve as USER
+                    </Button>
+                    {isMainAdmin && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-white dark:bg-[#181d2f] text-[#5b5bd6] font-bold"
+                        onClick={() => handleApproveUser(u.id, 'SUB_ADMIN')}
+                      >
+                        Approve as SUB ADMIN
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              )}
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-xs text-[#64748b]">
+              No registrations waiting for approval.
+            </div>
+          )}
+        </Card>
+      )}
 
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowInviteModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  disabled={inviteLoading}
-                >
-                  {inviteLoading ? 'Sending...' : 'Send Invitation'}
-                </Button>
+      {/* TAB 4: SUB ADMINS (Requirement 62) */}
+      {activeTab === 'subadmins' && isMainAdmin && (
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+          <h2 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Sub-Admin Workspaces</h2>
+          <p className="text-xs text-[#64748b]">
+            Sub-Admins can manage subordinate users assigned under them, but cannot see Super Admin, Admin Friend, or Main-Admin-Only users.
+          </p>
+
+          <div className="space-y-3 pt-2">
+            {subAdminList.map(sa => {
+              const subordinates = users.filter(u => u.managedBy === sa.id);
+              return (
+                <div key={sa.id} className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#181d2f] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc]">{sa.displayName}</h4>
+                    <Badge variant="brand">Sub-Admin</Badge>
+                  </div>
+                  <p className="text-xs text-[#64748b]">{sa.email}</p>
+                  <div className="pt-2 text-xs font-semibold text-[#5b5bd6]">
+                    Manages {subordinates.length} assigned users
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* TAB 5: ADMIN FRIEND SELECTION (Requirement 61) */}
+      {activeTab === 'friend' && isMainAdmin && (
+        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-5 max-w-2xl">
+          <div>
+            <h2 className="text-base font-extrabold text-[#172033] dark:text-[#f8f9fc] flex items-center gap-2">
+              <HeartHandshake className="w-5 h-5 text-emerald-600" />
+              <span>Admin Friend Selection</span>
+            </h2>
+            <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-1">
+              Select one active friend. When saved, the Super Admin and Admin Friend will share the private <strong>Study Together</strong> comparison room.
+            </p>
+          </div>
+
+          {friendSaveStatus && (
+            <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
+              ✓ {friendSaveStatus}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Select Admin Friend:
+            </label>
+            <select
+              value={selectedFriendUserId}
+              onChange={e => setSelectedFriendUserId(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold text-[#172033] dark:text-[#f8f9fc] outline-none"
+            >
+              <option value="">-- Choose User as Admin Friend --</option>
+              {users.filter(u => u.role !== 'MAIN_ADMIN').map(u => (
+                <option key={u.id} value={u.id}>
+                  {u.displayName} ({u.email})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="pt-2 flex items-center justify-between">
+            <span className="text-xs text-[#64748b]">
+              Current Friend: <strong className="text-[#172033] dark:text-white">{activeFriendName || 'None'}</strong>
+            </span>
+            <Button
+              variant="primary"
+              size="md"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+              onClick={handleSaveAdminFriend}
+              disabled={!selectedFriendUserId}
+            >
+              Save Admin Friend
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ================= MODAL: ADMIN RESET USER DATA (Requirement 56) ================= */}
+      {resetModalUser && (
+        <Modal
+          isOpen={true}
+          onClose={() => setResetModalUser(null)}
+          title={`Reset Data: ${resetModalUser.displayName}`}
+          size="md"
+        >
+          <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+            <div className="p-3.5 bg-rose-500/10 rounded-xl border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs space-y-1">
+              <p className="font-bold">Caution: This action cannot be undone.</p>
+              <p>Choose whether to reset only study progress/attempts or wipe all study data (courses, questions, planner).</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-bold">Reset Type:</label>
+              <div className="space-y-2 text-xs">
+                <label className="flex items-center gap-2 p-2.5 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="resetType"
+                    checked={resetType === 'PROGRESS_ONLY'}
+                    onChange={() => setResetType('PROGRESS_ONLY')}
+                  />
+                  <span><strong>Reset Progress Only</strong> (clears study time, attempts, scores; keeps courses & questions)</span>
+                </label>
+
+                <label className="flex items-center gap-2 p-2.5 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d] cursor-pointer">
+                  <input
+                    type="radio"
+                    name="resetType"
+                    checked={resetType === 'FULL_STUDY_DATA'}
+                    onChange={() => setResetType('FULL_STUDY_DATA')}
+                  />
+                  <span><strong>Full Study Data Wipe</strong> (deletes user's courses, syllabus, questions, planner, sessions)</span>
+                </label>
               </div>
-            </form>
-          </Card>
-        </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-xs font-bold">
+                Type <code>RESET</code> to confirm:
+              </label>
+              <input
+                type="text"
+                value={resetConfirmText}
+                onChange={e => setResetConfirmText(e.target.value)}
+                placeholder="RESET"
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-rose-400 font-bold outline-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setResetModalUser(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+                onClick={handleExecuteReset}
+                disabled={resetConfirmText !== 'RESET' || isResetting}
+              >
+                {isResetting ? 'Resetting...' : 'Confirm Reset'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

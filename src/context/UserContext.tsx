@@ -1,28 +1,40 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { relationshipService } from '../services/relationshipService';
 import type { Profile } from '../lib/supabase';
-
-export interface UserProfileDisplay {
-  id: string;
-  name: string;
-  email: string;
-  avatarUrl: string;
-  role: 'MAIN_ADMIN' | 'SUB_ADMIN' | 'USER';
-  dailyGoalMinutes: number;
-}
+import type { UserProfileDisplay } from '../types';
 
 interface UserContextType {
   currentUser: UserProfileDisplay;
   profile: Profile | null;
   isAdmin: boolean;
+  isMainAdmin: boolean;
   isSubAdmin: boolean;
+  isAdminFriend: boolean;
+  isApproved: boolean;
   canAccessAdmin: boolean;
+  canAccessTogether: boolean;
+  refreshFriendStatus: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, profile, role } = useAuth();
+  const { user, profile, role, status, isApproved } = useAuth();
+  const [hasActiveFriendRelationship, setHasActiveFriendRelationship] = useState(false);
+
+  const checkFriendStatus = async () => {
+    if (!user) {
+      setHasActiveFriendRelationship(false);
+      return;
+    }
+    const partner = await relationshipService.getActivePartner();
+    setHasActiveFriendRelationship(Boolean(partner));
+  };
+
+  useEffect(() => {
+    checkFriendStatus();
+  }, [user?.id, role]);
 
   const currentUser: UserProfileDisplay = {
     id: user?.id || 'anonymous-user',
@@ -30,15 +42,33 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     email: user?.email || '',
     avatarUrl: profile?.avatar_url || (profile?.display_name?.toLowerCase().includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png'),
     role: role,
+    status: status,
     dailyGoalMinutes: profile?.daily_goal_minutes || 120,
+    managedBy: profile?.managed_by,
+    visibleToSubAdmin: profile?.visible_to_sub_admin !== false,
   };
 
-  const isAdmin = role === 'MAIN_ADMIN';
+  const isMainAdmin = role === 'MAIN_ADMIN';
   const isSubAdmin = role === 'SUB_ADMIN';
-  const canAccessAdmin = isAdmin || isSubAdmin;
+  const isAdminFriend = role === 'FRIEND' || (hasActiveFriendRelationship && !isMainAdmin);
+  const canAccessAdmin = isMainAdmin || isSubAdmin;
+  const canAccessTogether = isMainAdmin ? hasActiveFriendRelationship : isAdminFriend;
 
   return (
-    <UserContext.Provider value={{ currentUser, profile, isAdmin, isSubAdmin, canAccessAdmin }}>
+    <UserContext.Provider
+      value={{
+        currentUser,
+        profile,
+        isAdmin: isMainAdmin,
+        isMainAdmin,
+        isSubAdmin,
+        isAdminFriend,
+        isApproved,
+        canAccessAdmin,
+        canAccessTogether,
+        refreshFriendStatus: checkFriendStatus,
+      }}
+    >
       {children}
     </UserContext.Provider>
   );

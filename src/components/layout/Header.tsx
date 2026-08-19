@@ -4,12 +4,12 @@ import {
   Sun,
   Moon,
   Flame,
-  User,
   Settings,
   ShieldAlert,
   LogOut,
   ChevronDown,
   Users2,
+  BookOpen,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
 import { useUser } from '../../context/UserContext';
@@ -25,34 +25,33 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, studyStreak = 1 }) => {
   const { theme, toggleTheme } = useTheme();
-  const { currentUser, canAccessAdmin } = useUser();
+  const { currentUser, isMainAdmin, canAccessAdmin, canAccessTogether } = useUser();
   const { signOut } = useAuth();
-  const { openModal, isRunning, isPaused, activeTargetName, formattedTime } = useStudyTimer();
+  const { openModal, isRunning, isPaused, activeCourseName, formattedTime } = useStudyTimer();
   const [profileOpen, setProfileOpen] = useState(false);
 
   const pageTitles: Record<PageId, { title: string; subtitle: string }> = {
-    dashboard: { title: 'Dashboard', subtitle: `Welcome back, ${currentUser.name}. Track your daily targets.` },
-    targets: { title: 'My Targets', subtitle: 'Manage your competitive exams, courses, subjects & topics.' },
+    dashboard: { title: 'Dashboard', subtitle: `Welcome back, ${currentUser.name}.` },
+    courses: { title: 'My Courses', subtitle: 'Manage your courses, papers, syllabus, topics & lessons.' },
     practice: { title: 'MCQ Practice', subtitle: 'Solve targeted questions with instant scoring and explanations.' },
-    questions: { title: 'Question Bank', subtitle: 'Upload PDFs, notes, or manage questions with cloud backup.' },
-    planner: { title: 'Study Planner', subtitle: 'Schedule focused study sessions and email reminders.' },
-    together: { title: 'Study Together', subtitle: 'Side-by-side progress comparison for Siddhartha & Shilpa.' },
-    materials: { title: 'Syllabus & Materials', subtitle: 'Upload and view syllabus documents and notes.' },
-    settings: { title: 'Settings', subtitle: 'Manage email reminders, appearance, and preferences.' },
-    admin: { title: 'Admin Console', subtitle: 'User management, sub-admin delegation, and system stats.' },
+    questions: { title: 'Question Bank', subtitle: 'MCQs and subjective question paper archives.' },
+    planner: { title: 'Study Planner', subtitle: 'Schedule weekly study sessions with automated reminders.' },
+    together: { title: 'Study Together', subtitle: 'Compare study statistics with your study partner.' },
+    settings: { title: 'Settings', subtitle: 'Manage appearance, study preferences, and account data.' },
+    admin: { title: 'Admin Console', subtitle: isMainAdmin ? 'Manage users, approvals, sub-admins, and friends.' : 'Manage assigned study users.' },
   };
 
-  const currentInfo = pageTitles[currentPage] || { title: 'StudyDashboard', subtitle: 'Cloud Study Platform' };
+  const currentInfo = pageTitles[currentPage] || { title: 'StudyDashboard', subtitle: 'Personal Study Cloud' };
 
   return (
-    <header className="h-16 border-b border-[#e2e8f0] dark:border-[#23293d] bg-white/95 dark:bg-[#141824]/95 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30">
+    <header className="h-16 border-b border-[#e2e8f0] dark:border-[#23293d] bg-white/95 dark:bg-[#141824]/95 backdrop-blur-md px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 transition-colors">
       {/* Title & Subtitle */}
       <div>
         <h1 className="text-lg font-bold text-[#172033] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
           {currentInfo.title}
           {currentPage === 'together' && (
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6] border border-[#5b5bd6]/20">
-              Shared Room
+              Private Room
             </span>
           )}
         </h1>
@@ -63,11 +62,11 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, studySt
       <div className="flex items-center gap-2.5">
         {/* Streak Badge */}
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-700 dark:text-amber-400 text-xs font-bold">
-          <Flame className="w-4 h-4 text-amber-500 animate-pulse" />
+          <Flame className="w-4 h-4 text-amber-500" />
           <span>{studyStreak} Day Streak</span>
         </div>
 
-        {/* Global Study Timer Trigger */}
+        {/* Global Study Timer Trigger with Light/Dark theme support */}
         <button
           onClick={openModal}
           className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
@@ -77,14 +76,14 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, studySt
               ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-500/20'
               : 'bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white shadow-indigo-500/20'
           }`}
-          title={isRunning || isPaused ? 'Click to open study timer controls' : 'Start a focused study timer'}
+          title={isRunning || isPaused ? 'Open focus timer' : 'Start a focused study session'}
         >
           <Timer className="w-4 h-4" />
           <span>
             {isRunning
-              ? `● ${activeTargetName || 'Focus'}: ${formattedTime}`
+              ? `● ${activeCourseName || 'Focus'}: ${formattedTime}`
               : isPaused
-              ? `❚❚ ${activeTargetName || 'Paused'}: ${formattedTime}`
+              ? `❚❚ ${activeCourseName || 'Paused'}: ${formattedTime}`
               : 'Focus Now'}
           </span>
         </button>
@@ -124,13 +123,15 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, onNavigate, studySt
                     <span>Settings</span>
                   </button>
 
-                  <button
-                    onClick={() => { onNavigate('together'); setProfileOpen(false); }}
-                    className="w-full text-left px-3.5 py-2 text-xs text-[#334155] dark:text-[#cbd5e1] hover:bg-[#f8fafc] dark:hover:bg-[#181d2f] flex items-center gap-2"
-                  >
-                    <Users2 className="w-3.5 h-3.5 text-[#64748b]" />
-                    <span>Study Together</span>
-                  </button>
+                  {canAccessTogether && (
+                    <button
+                      onClick={() => { onNavigate('together'); setProfileOpen(false); }}
+                      className="w-full text-left px-3.5 py-2 text-xs text-[#334155] dark:text-[#cbd5e1] hover:bg-[#f8fafc] dark:hover:bg-[#181d2f] flex items-center gap-2"
+                    >
+                      <Users2 className="w-3.5 h-3.5 text-[#64748b]" />
+                      <span>Study Together</span>
+                    </button>
+                  )}
 
                   {canAccessAdmin && (
                     <button

@@ -3,7 +3,7 @@ import {
   calculateQuizResults,
   shuffleQuestionOptions,
 } from '../src/services/scoringEngine';
-import type { QuizSession, Question } from '../src/types';
+import type { QuizSession, Question, QuestionOption } from '../src/types';
 
 describe('scoringEngine', () => {
   const sampleQuestions: Question[] = [
@@ -192,7 +192,7 @@ describe('scoringEngine', () => {
     const shuffled = shuffleQuestionOptions(original);
     expect(shuffled.options.length).toBe(4);
 
-    const betaOption = shuffled.options.find(o => o.text === 'Beta');
+    const betaOption = shuffled.options.find((o: QuestionOption) => o.text === 'Beta');
     expect(betaOption).toBeDefined();
     expect(betaOption?.id).toBe(shuffled.correctOptionId);
   });

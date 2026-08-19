@@ -1,148 +1,158 @@
 import React, { useState, useEffect } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, updateUserSettings } from '../db';
-import { resetAllProgressToZero } from '../db/seed';
+import { useAuth } from '../context/AuthContext';
 import { useUser } from '../context/UserContext';
+import { useTheme, type ThemeMode } from '../context/ThemeContext';
+import { adminService } from '../services/adminService';
+import { supabase } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
-import { ResetModal } from '../components/common/ResetModal';
-import { ErrorBoundary } from '../components/common/ErrorBoundary';
+import { Modal } from '../components/common/Modal';
 import {
   User,
   Sun,
   Moon,
+  Laptop,
   Clock,
   Mail,
   Database,
+  Lock,
   RotateCcw,
-  Download,
-  Sliders,
   CheckCircle2,
+  AlertTriangle,
+  LogOut,
+  Sliders,
 } from 'lucide-react';
-import { sendDailySummaryEmail } from '../services/emailService';
-import { exportBackupData } from '../services/backupService';
-import { format, startOfDay, endOfDay } from 'date-fns';
-import { DAILY_PALETTES, applyDailyTheme } from '../utils/dailyTheme';
 
 type SettingsTab =
   | 'profile'
   | 'appearance'
   | 'preferences'
   | 'email'
-  | 'data';
+  | 'data'
+  | 'security';
 
-export const SettingsContent: React.FC = () => {
+export const Settings: React.FC = () => {
+  const { user, profile, refreshProfile, updatePassword, signOut } = useAuth();
   const { currentUser } = useUser();
+  const { themeMode, setThemeMode } = useTheme();
+
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
-  const settings = useLiveQuery(() => db.userSettings.get(currentUser.id), [currentUser.id]);
-
   // Form states
-  const [recipientEmail, setRecipientEmail] = useState(currentUser.email || '');
-  const [isReminder15m, setIsReminder15m] = useState(true);
-  const [isDaily10pm, setIsDaily10pm] = useState(true);
-  const [dailyGoalHours, setDailyGoalHours] = useState<number>(3);
-  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
-    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  });
+  const [displayName, setDisplayName] = useState(currentUser.name || '');
+  const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(currentUser.dailyGoalMinutes || 150);
+  const [defaultFocusDuration, setDefaultFocusDuration] = useState<number>(45);
+  const [defaultQuestionCount, setDefaultQuestionCount] = useState<number>(15);
+  const [defaultExamTimer, setDefaultExamTimer] = useState<number>(30);
+  const [weekStartsOnMonday, setWeekStartsOnMonday] = useState<boolean>(true);
 
-  // Status banners
+  // Email & Reminders
+  const [dailyReportEnabled, setDailyReportEnabled] = useState(true);
+  const [dailyReportTime, setDailyReportTime] = useState('22:00');
+  const [studyRemindersEnabled, setStudyRemindersEnabled] = useState(true);
+  const [reminderMinutesBefore, setReminderMinutesBefore] = useState(15);
+
+  // Security
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState<string | null>(null);
+
+  // Save Banner
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
-  const [emailStatus, setEmailStatus] = useState<string | null>(null);
-  const [backupStatus, setBackupStatus] = useState<string | null>(null);
-  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+
+  // Reset Modals
+  const [isResetProgressModalOpen, setIsResetProgressModalOpen] = useState(false);
+  const [isResetDataModalOpen, setIsResetDataModalOpen] = useState(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState('');
+  const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
-    if (settings) {
-      setRecipientEmail(settings.recipientEmail || currentUser.email || '');
-      setIsReminder15m(settings.reminder15minEnabled ?? true);
-      setIsDaily10pm(settings.dailySummary10pmEnabled ?? true);
-    } else {
-      setRecipientEmail(currentUser.email || '');
+    if (profile) {
+      setDisplayName(profile.display_name || '');
+      setDailyGoalMinutes(profile.daily_goal_minutes || 150);
     }
-  }, [settings, currentUser]);
+  }, [profile]);
 
-  const handleThemeChange = (mode: 'dark' | 'light') => {
-    setThemeMode(mode);
-    if (mode === 'dark') {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('studydashboard_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('studydashboard_theme', 'light');
+  // Handle Save Profile & Preferences
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    try {
+      await supabase
+        .from('profiles')
+        .update({
+          display_name: displayName.trim(),
+          daily_goal_minutes: dailyGoalMinutes,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      await refreshProfile();
+      setSaveStatus('Profile and preferences updated successfully.');
+      setTimeout(() => setSaveStatus(null), 3500);
+    } catch (err) {
+      console.error('Error saving profile:', err);
     }
   };
 
-  const handleSavePreferences = async () => {
-    await updateUserSettings(currentUser.id, {
-      recipientEmail,
-      reminder15minEnabled: isReminder15m,
-      dailySummary10pmEnabled: isDaily10pm,
-    });
-    setSaveStatus('Settings successfully saved and persisted.');
-    setTimeout(() => setSaveStatus(null), 3500);
+  // Handle Update Password
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      setPasswordStatus('Password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordStatus('Passwords do not match.');
+      return;
+    }
+
+    const { error } = await updatePassword(newPassword);
+    if (error) {
+      setPasswordStatus(error);
+    } else {
+      setPasswordStatus('Password successfully changed.');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setPasswordStatus(null), 4000);
+    }
   };
 
-  const handleTest10pmSummary = async () => {
-    setEmailStatus('Generating study statistics and dispatching 10:00 PM Daily Summary...');
-
-    const todayStart = startOfDay(new Date()).getTime();
-    const todayEnd = endOfDay(new Date()).getTime();
-
-    const targets = await db.targets.where('userId').equals(currentUser.id).toArray();
-    const sessions = await db.studySessions
-      .where('userId').equals(currentUser.id)
-      .and(s => s.startTime >= todayStart && s.startTime <= todayEnd)
-      .toArray();
-
-    const attempts = await db.attempts
-      .where('userId').equals(currentUser.id)
-      .and(a => a.timestamp >= todayStart && a.timestamp <= todayEnd)
-      .toArray();
-
-    const totalStudy = sessions.reduce((sum, s) => sum + s.focusedMinutes, 0);
-    const totalGoal = targets.reduce((sum, t) => sum + t.dailyGoalMinutes, 0) || 120;
-    const goalPct = Math.min(100, Math.round((totalStudy / totalGoal) * 100));
-
-    const attempted = attempts.length;
-    const correct = attempts.filter(a => a.isCorrect).length;
-    const wrong = attempted - correct;
-    const accuracy = attempted > 0 ? Math.round((correct / attempted) * 100) : null;
-
-    const targetBreakdown: Record<string, number> = {};
-    targets.forEach(t => {
-      targetBreakdown[t.name] = sessions.filter(s => s.targetId === t.id).reduce((sum, s) => sum + s.focusedMinutes, 0);
-    });
-
-    const result = await sendDailySummaryEmail({
-      userId: currentUser.id,
-      userName: currentUser.name,
-      recipientEmail,
-      todayFocusMinutes: totalStudy,
-      dailyGoalMinutes: totalGoal,
-      goalCompletionPct: goalPct,
-      mcqsAttempted: attempted,
-      mcqsCorrect: correct,
-      mcqsWrong: wrong,
-      accuracyPct: accuracy,
-      targetBreakdown,
-    });
-
-    setEmailStatus(`Daily Summary dispatched: "${result.message}"`);
-    setTimeout(() => setEmailStatus(null), 5000);
+  // Handle Reset User Progress
+  const handleResetProgress = async () => {
+    if (!user) return;
+    setIsResetting(true);
+    try {
+      const success = await adminService.resetUserData(user.id, 'PROGRESS_ONLY');
+      if (success) {
+        alert('Your study progress and attempt history have been reset.');
+        setIsResetProgressModalOpen(false);
+      } else {
+        alert('Failed to reset progress.');
+      }
+    } finally {
+      setIsResetting(false);
+    }
   };
 
-  const handleExportBackup = async () => {
-    const jsonStr = await exportBackupData();
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `studydashboard-backup-${currentUser.id}-${format(new Date(), 'yyyy-MM-dd')}.json`;
-    a.click();
-    setBackupStatus('Backup exported successfully.');
-    setTimeout(() => setBackupStatus(null), 4000);
+  // Handle Reset User Full Study Data
+  const handleResetStudyData = async () => {
+    if (!user || resetConfirmInput !== 'RESET') return;
+    setIsResetting(true);
+    try {
+      const success = await adminService.resetUserData(user.id, 'FULL_STUDY_DATA');
+      if (success) {
+        alert('All your study data (courses, questions, planner) have been reset.');
+        setIsResetDataModalOpen(false);
+        setResetConfirmInput('');
+      } else {
+        alert('Failed to reset study data.');
+      }
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   const tabs: Array<{ id: SettingsTab; label: string; icon: React.FC<{ className?: string }> }> = [
@@ -151,353 +161,418 @@ export const SettingsContent: React.FC = () => {
     { id: 'preferences', label: 'Study Preferences', icon: Sliders },
     { id: 'email', label: 'Email & Reminders', icon: Mail },
     { id: 'data', label: 'Data & Progress', icon: Database },
+    { id: 'security', label: 'Security', icon: Lock },
   ];
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6 pb-16 animate-fade-in">
+    <div className="space-y-6 max-w-5xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+      {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Settings & Preferences</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Configure profile, email reminders, timer defaults, and backup data.
+        <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight">
+          Settings & Configuration
+        </h1>
+        <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
+          Customize your study preferences, themes, reminders, and manage account security.
         </p>
       </div>
 
       {saveStatus && (
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
+        <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold animate-fade-in flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4" />
           <span>{saveStatus}</span>
         </div>
       )}
 
-      {/* Tabs Navigation */}
-      <div className="flex overflow-x-auto gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
-        {tabs.map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                isActive
-                  ? 'bg-brand-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Icon className="w-3.5 h-3.5" />
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ================= TAB 1: PROFILE ================= */}
-      {activeTab === 'profile' && (
-        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-6">
-          <div className="flex items-center gap-4">
-            <img
-              src={currentUser.avatarUrl}
-              alt={currentUser.name}
-              className="w-16 h-16 rounded-full border border-slate-300 dark:border-slate-700 object-cover shadow-xs"
-            />
-            <div>
-              <h4 className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</h4>
-              <p className="text-xs text-slate-500">{currentUser.email}</p>
-              <div className="flex items-center gap-2 mt-1.5">
-                <Badge variant="brand">
-                  Role: {currentUser.role}
-                </Badge>
-                <span className="text-xs text-slate-500">
-                  Goal: {Math.floor(currentUser.dailyGoalMinutes / 60)}h {currentUser.dailyGoalMinutes % 60}m/day
-                </span>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* ================= TAB 2: APPEARANCE ================= */}
-      {activeTab === 'appearance' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">Color Mode</h3>
-            <p className="text-xs text-slate-500">Choose between clean Light Slate or Midnight Dark mode.</p>
-
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => handleThemeChange('light')}
-                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
-                  themeMode === 'light'
-                    ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                <Sun className="w-4 h-4 text-amber-500" />
-                <span>Light Mode (Clean Slate)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleThemeChange('dark')}
-                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
-                  themeMode === 'dark'
-                    ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
-                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                <Moon className="w-4 h-4 text-indigo-400" />
-                <span>Dark Mode (Midnight Slate)</span>
-              </button>
-            </div>
+      {/* Main Settings Card with Sidebar Navigation */}
+      <Card className="border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-12 divide-y md:divide-y-0 md:divide-x divide-[#e2e8f0] dark:divide-[#23293d]">
+          {/* Settings Nav (4 cols) */}
+          <div className="md:col-span-4 p-3 sm:p-4 space-y-1 bg-[#f8fafc]/50 dark:bg-[#141824]/50">
+            {tabs.map(t => {
+              const Icon = t.icon;
+              const isActive = activeTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
+                    isActive
+                      ? 'bg-[#5b5bd6] text-white shadow-xs'
+                      : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white hover:bg-white dark:hover:bg-[#181d2f]'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{t.label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          {/* Daily Rotating Color Refresh */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-brand-500 animate-pulse" />
-                  <span>Daily Color Refresh (Dynamic Accent)</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  App colors refresh dynamically every day so studying stays visually exciting.
-                </p>
-              </div>
+          {/* Settings Content Area (8 cols) */}
+          <div className="md:col-span-8 p-6 sm:p-8">
+            {/* TAB 1: PROFILE */}
+            {activeTab === 'profile' && (
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Profile Settings</h3>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs"
-                onClick={() => {
-                  localStorage.setItem('studydashboard_custom_theme_day', 'auto');
-                  applyDailyTheme();
-                  setSaveStatus('Theme set to automatic daily rotation!');
-                  setTimeout(() => setSaveStatus(null), 3000);
-                }}
-              >
-                Reset to Auto-Daily
+                <div className="flex items-center gap-4 pb-2">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.name}
+                    className="w-14 h-14 rounded-full border-2 border-[#5b5bd6] object-cover shadow-xs"
+                  />
+                  <div>
+                    <h4 className="font-bold text-sm text-[#172033] dark:text-white">{currentUser.name}</h4>
+                    <p className="text-xs text-[#64748b]">{currentUser.email}</p>
+                    <Badge variant="neutral" size="sm" className="mt-1">{currentUser.role}</Badge>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                    Display Name
+                  </label>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={e => setDisplayName(e.target.value)}
+                    required
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none focus:border-[#5b5bd6]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                    Email Address (Read-Only)
+                  </label>
+                  <input
+                    type="text"
+                    value={currentUser.email}
+                    disabled
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#94a3b8] cursor-not-allowed"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                    Timezone
+                  </label>
+                  <input
+                    type="text"
+                    value="Asia/Kathmandu (UTC +05:45)"
+                    disabled
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#94a3b8] cursor-not-allowed"
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <Button type="submit" variant="primary" size="sm" className="bg-[#5b5bd6] text-white font-bold">
+                    Save Profile
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: APPEARANCE (Requirement 51) */}
+            {activeTab === 'appearance' && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Appearance & Themes</h3>
+                  <p className="text-xs text-[#64748b]">
+                    Theme is applied consistently to Dashboard, sidebar, Practice, Question Bank, Planner, Together, and all modals.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('light')}
+                    className={`p-4 rounded-2xl border text-center space-y-2 transition-all ${
+                      themeMode === 'light'
+                        ? 'bg-[#eef2f6] border-[#5b5bd6] text-[#5b5bd6] font-bold shadow-xs'
+                        : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
+                    }`}
+                  >
+                    <Sun className="w-6 h-6 mx-auto text-amber-500" />
+                    <div className="text-xs font-bold">Comfort Light</div>
+                    <p className="text-[10px] text-[#64748b]">Soft gray background & readable contrast</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('dark')}
+                    className={`p-4 rounded-2xl border text-center space-y-2 transition-all ${
+                      themeMode === 'dark'
+                        ? 'bg-[#1f2538] border-[#5b5bd6] text-[#8282ea] font-bold shadow-xs'
+                        : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
+                    }`}
+                  >
+                    <Moon className="w-6 h-6 mx-auto text-[#5b5bd6]" />
+                    <div className="text-xs font-bold">Dark Theme</div>
+                    <p className="text-[10px] text-[#64748b]">Sleek dark slate for low-light studying</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setThemeMode('system')}
+                    className={`p-4 rounded-2xl border text-center space-y-2 transition-all ${
+                      themeMode === 'system'
+                        ? 'bg-[#eef2f6] dark:bg-[#1f2538] border-[#5b5bd6] text-[#5b5bd6] font-bold shadow-xs'
+                        : 'bg-white dark:bg-[#181d2f] border-[#e2e8f0] dark:border-[#23293d] text-[#64748b]'
+                    }`}
+                  >
+                    <Laptop className="w-6 h-6 mx-auto text-[#64748b]" />
+                    <div className="text-xs font-bold">System Default</div>
+                    <p className="text-[10px] text-[#64748b]">Match your OS light/dark setting</p>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 3: STUDY PREFERENCES (Requirement 52) */}
+            {activeTab === 'preferences' && (
+              <form onSubmit={handleSaveProfile} className="space-y-4">
+                <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Study Preferences</h3>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold">Daily Study Goal (Minutes)</label>
+                  <input
+                    type="number"
+                    value={dailyGoalMinutes}
+                    onChange={e => setDailyGoalMinutes(parseInt(e.target.value) || 120)}
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold">Default Focus Duration</label>
+                    <input
+                      type="number"
+                      value={defaultFocusDuration}
+                      onChange={e => setDefaultFocusDuration(parseInt(e.target.value) || 45)}
+                      className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-bold">Default Practice Qty</label>
+                    <input
+                      type="number"
+                      value={defaultQuestionCount}
+                      onChange={e => setDefaultQuestionCount(parseInt(e.target.value) || 15)}
+                      className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <Button type="submit" variant="primary" size="sm" className="bg-[#5b5bd6] text-white font-bold">
+                    Save Preferences
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* TAB 4: EMAIL & REMINDERS (Requirement 53, 54) */}
+            {activeTab === 'email' && (
+              <div className="space-y-5">
+                <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Email & Reminders</h3>
+
+                <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#23293d] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs">15-Minute Study Reminder</h4>
+                      <p className="text-[11px] text-[#64748b]">Sent 15 minutes before your scheduled planner session starts</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={studyRemindersEnabled}
+                      onChange={e => setStudyRemindersEnabled(e.target.checked)}
+                      className="w-4 h-4 text-[#5b5bd6] rounded"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#23293d] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-xs">Daily Study Summary Email</h4>
+                      <p className="text-[11px] text-[#64748b]">Daily evening progress report with study graph and accuracy stats</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={dailyReportEnabled}
+                      onChange={e => setDailyReportEnabled(e.target.checked)}
+                      className="w-4 h-4 text-[#5b5bd6] rounded"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 5: DATA & PROGRESS (Requirement 55) */}
+            {activeTab === 'data' && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Data & Progress Reset</h3>
+                  <p className="text-xs text-[#64748b]">
+                    Manage your stored cloud study data and progress records.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#23293d] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-xs">Reset My Progress</h4>
+                    <p className="text-[11px] text-[#64748b]">
+                      Clears study sessions, attempts, and streak history. Keeps your courses, syllabus, and questions.
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs font-bold text-amber-600 border-amber-300 dark:border-amber-800"
+                    onClick={() => setIsResetProgressModalOpen(true)}
+                  >
+                    Reset Progress
+                  </Button>
+                </div>
+
+                <div className="p-4 rounded-xl bg-white dark:bg-[#181d2f] border border-rose-200 dark:border-rose-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-bold text-xs text-rose-600">Reset My Study Data (Complete Wipe)</h4>
+                    <p className="text-[11px] text-[#64748b]">
+                      Permanently wipes all your courses, subjects, topics, lessons, questions, and planner sessions.
+                    </p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs"
+                    onClick={() => setIsResetDataModalOpen(true)}
+                  >
+                    Reset Study Data
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 6: SECURITY (Requirement 57) */}
+            {activeTab === 'security' && (
+              <form onSubmit={handleUpdatePassword} className="space-y-4">
+                <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Security & Password</h3>
+
+                {passwordStatus && (
+                  <div className="p-3 bg-amber-500/10 rounded-xl border border-amber-500/30 text-xs font-bold text-amber-700 dark:text-amber-300">
+                    {passwordStatus}
+                  </div>
+                )}
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold">New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold">Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] outline-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-between">
+                  <Button type="submit" variant="primary" size="sm" className="bg-[#5b5bd6] text-white font-bold">
+                    Change Password
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-rose-600 border-rose-200 font-bold"
+                    onClick={() => signOut()}
+                  >
+                    Sign Out All Devices
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {/* ================= MODAL: RESET PROGRESS CONFIRM ================= */}
+      {isResetProgressModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsResetProgressModalOpen(false)}
+          title="Confirm Reset Progress"
+          size="sm"
+        >
+          <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc] text-center">
+            <p className="text-xs text-[#64748b]">
+              Are you sure you want to reset your study session history and quiz attempts? Your courses and questions will NOT be deleted.
+            </p>
+            <div className="flex justify-center gap-3 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setIsResetProgressModalOpen(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" className="bg-amber-600 text-white font-bold" onClick={handleResetProgress} disabled={isResetting}>
+                {isResetting ? 'Resetting...' : 'Yes, Reset Progress'}
               </Button>
             </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 pt-1">
-              {Object.entries(DAILY_PALETTES).map(([dayKey, pal]) => {
-                const dayNum = Number(dayKey);
-                return (
-                  <button
-                    key={dayKey}
-                    type="button"
-                    onClick={() => {
-                      applyDailyTheme(dayNum);
-                      setSaveStatus(`Theme changed to ${pal.dayName} (${pal.name})!`);
-                      setTimeout(() => setSaveStatus(null), 3000);
-                    }}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/40 hover:border-slate-300 text-left transition-all space-y-1.5"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white">{pal.dayName}</span>
-                      <span
-                        className="w-4 h-4 rounded-full border border-white/40 shadow-xs shrink-0"
-                        style={{ backgroundColor: pal.previewColor }}
-                      />
-                    </div>
-                    <p className="text-[11px] font-semibold" style={{ color: pal.previewColor }}>{pal.name}</p>
-                    <p className="text-[10px] text-slate-400 line-clamp-1">{pal.description}</p>
-                  </button>
-                );
-              })}
-            </div>
           </div>
-        </Card>
+        </Modal>
       )}
 
-      {/* ================= TAB 3: STUDY PREFERENCES ================= */}
-      {activeTab === 'preferences' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Study Preferences & Timezone</h3>
+      {/* ================= MODAL: RESET STUDY DATA CONFIRM (Type RESET) ================= */}
+      {isResetDataModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsResetDataModalOpen(false)}
+          title="Wipe All Study Data"
+          size="sm"
+        >
+          <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
+            <p className="text-xs text-rose-600 font-semibold">
+              Warning: This will permanently delete all your courses, subjects, syllabus topics, questions, and planner sessions.
+            </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Calendar Timezone (Asia/Kathmandu)
-              </label>
-              <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white">
-                <Clock className="w-4 h-4 text-brand-600" />
-                <span>Asia/Kathmandu (UTC+5:45)</span>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">Midnight rollover strictly calculates Nepal calendar days.</p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Default Daily Goal
-              </label>
-              <select
-                value={dailyGoalHours}
-                onChange={e => setDailyGoalHours(Number(e.target.value))}
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value={2}>2 Hours / day</option>
-                <option value={3}>3 Hours / day</option>
-                <option value={4}>4 Hours / day</option>
-                <option value={5}>5 Hours / day</option>
-                <option value={6}>6 Hours / day</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button variant="primary" size="sm" onClick={handleSavePreferences}>
-              Save Preferences
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* ================= TAB 4: EMAIL & REMINDERS ================= */}
-      {activeTab === 'email' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Mail className="w-4 h-4 text-blue-500" />
-                <span>Automated Email Reminders & Nightly Summary</span>
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>
-            </div>
-          </div>
-
-          {emailStatus && (
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-              {emailStatus}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            {/* Sender Address Info Banner */}
-            <div className="p-3.5 rounded-xl bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-200 space-y-1">
-              <div className="font-bold flex items-center gap-1.5">
-                <Mail className="w-3.5 h-3.5 text-blue-600" />
-                <span>Email Sender Configuration:</span>
-              </div>
-              <p className="text-[11px] text-blue-700 dark:text-blue-300">
-                Emails are securely dispatched via Resend from: <code className="px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900 font-mono font-bold">StudyDashboard &lt;study@resend.dev&gt;</code> (or your custom domain set in <code className="font-mono">RESEND_FROM_EMAIL</code>).
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Recipient Email Address (Where you receive your alerts)
+            <div className="space-y-1">
+              <label className="block text-xs font-bold">
+                Type <code>RESET</code> to confirm:
               </label>
               <input
-                type="email"
-                value={recipientEmail}
-                onChange={e => setRecipientEmail(e.target.value)}
-                className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
+                type="text"
+                value={resetConfirmInput}
+                onChange={e => setResetConfirmInput(e.target.value)}
+                placeholder="RESET"
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-rose-400 font-bold outline-none"
               />
             </div>
 
-            <div className="space-y-2.5 pt-1">
-              <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isReminder15m}
-                  onChange={e => setIsReminder15m(e.target.checked)}
-                  className="rounded text-brand-600 focus:ring-brand-500"
-                />
-                <span>Enable 15-minute advance reminder before scheduled study sessions</span>
-              </label>
-
-              <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={isDaily10pm}
-                  onChange={e => setIsDaily10pm(e.target.checked)}
-                  className="rounded text-brand-600 focus:ring-brand-500"
-                />
-                <span>Enable 10:30 PM Asia/Kathmandu Daily Summary Email (with 7-day focus chart)</span>
-              </label>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-              <Button variant="primary" size="sm" onClick={handleSavePreferences}>
-                Save Email Preferences
-              </Button>
-              <Button variant="outline" size="sm" leftIcon={<Mail className="w-3.5 h-3.5" />} onClick={handleTest10pmSummary}>
-                Send Test 10:30 PM Summary
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setIsResetDataModalOpen(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                size="sm"
+                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
+                onClick={handleResetStudyData}
+                disabled={resetConfirmInput !== 'RESET' || isResetting}
+              >
+                {isResetting ? 'Wiping...' : 'Confirm Wipe'}
               </Button>
             </div>
           </div>
-        </Card>
+        </Modal>
       )}
-
-      {/* ================= TAB 5: DATA & PROGRESS ================= */}
-      {activeTab === 'data' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Database className="w-4 h-4 text-blue-500" />
-            <span>Data Management & Study Reset</span>
-          </h3>
-
-          {backupStatus && (
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-              {backupStatus}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                Backup & Export
-              </h4>
-              <p className="text-xs text-slate-500 mb-2">Export your study history, questions, and targets to a JSON backup.</p>
-              <Button
-                variant="outline"
-                size="sm"
-                leftIcon={<Download className="w-4 h-4" />}
-                onClick={handleExportBackup}
-              >
-                Export JSON Backup
-              </Button>
-            </div>
-
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
-              <h4 className="text-xs font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">
-                Reset Study Progress (Fresh Start)
-              </h4>
-              <p className="text-xs text-slate-500 mb-3">
-                Permanently wipes study sessions, streaks, and MCQ attempts back to Day 0. Your targets, subjects, and questions remain intact.
-              </p>
-              <Button
-                variant="danger"
-                size="sm"
-                leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-                onClick={() => setIsResetModalOpen(true)}
-              >
-                Reset Progress / Streak
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* 2-Step Verification Reset Modal */}
-      <ResetModal
-        isOpen={isResetModalOpen}
-        onClose={() => setIsResetModalOpen(false)}
-        onSuccess={(msg) => {
-          setSaveStatus(msg);
-          setTimeout(() => setSaveStatus(null), 5000);
-        }}
-      />
     </div>
-  );
-};
-
-export const Settings: React.FC = () => {
-  return (
-    <ErrorBoundary fallbackTitle="Settings unavailable">
-      <SettingsContent />
-    </ErrorBoundary>
   );
 };

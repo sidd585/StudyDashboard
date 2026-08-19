@@ -1,12 +1,11 @@
 import React from 'react';
 import {
   LayoutDashboard,
-  Target as TargetIcon,
+  BookOpen,
   BookOpenCheck,
   HelpCircle,
   Calendar,
   Users2,
-  FolderArchive,
   Settings,
   ShieldAlert,
   Sparkles,
@@ -17,12 +16,11 @@ import { useAuth } from '../../context/AuthContext';
 
 export type PageId =
   | 'dashboard'
-  | 'targets'
+  | 'courses'
   | 'practice'
   | 'questions'
   | 'planner'
   | 'together'
-  | 'materials'
   | 'settings'
   | 'admin';
 
@@ -32,23 +30,28 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => {
-  const { currentUser, canAccessAdmin } = useUser();
+  const { currentUser, isMainAdmin, isSubAdmin, canAccessAdmin, canAccessTogether } = useUser();
   const { signOut } = useAuth();
 
-  const navItems: { id: PageId; label: string; icon: React.FC<{ className?: string }>; badge?: string; show?: boolean }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'targets', label: 'My Targets', icon: TargetIcon },
-    { id: 'practice', label: 'Practice', icon: BookOpenCheck },
-    { id: 'questions', label: 'Question Bank', icon: HelpCircle },
-    { id: 'planner', label: 'Planner', icon: Calendar },
-    { id: 'together', label: 'Together', icon: Users2, badge: 'Shared' },
-    { id: 'materials', label: 'Materials', icon: FolderArchive },
-    { id: 'settings', label: 'Settings', icon: Settings },
-    { id: 'admin', label: 'Admin', icon: ShieldAlert, badge: 'Admin', show: canAccessAdmin },
+  const navItems: {
+    id: PageId;
+    label: string;
+    icon: React.FC<{ className?: string }>;
+    badge?: string;
+    show: boolean;
+  }[] = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, show: true },
+    { id: 'courses', label: 'My Courses', icon: BookOpen, show: true },
+    { id: 'practice', label: 'Practice', icon: BookOpenCheck, show: true },
+    { id: 'questions', label: 'Question Bank', icon: HelpCircle, show: true },
+    { id: 'planner', label: 'Planner', icon: Calendar, show: true },
+    { id: 'together', label: 'Together', icon: Users2, badge: 'Shared', show: canAccessTogether },
+    { id: 'settings', label: 'Settings', icon: Settings, show: true },
+    { id: 'admin', label: 'Admin', icon: ShieldAlert, badge: isMainAdmin ? 'Main' : 'Sub', show: canAccessAdmin },
   ];
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 border-r border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shrink-0 h-screen sticky top-0">
+    <aside className="hidden lg:flex flex-col w-64 border-r border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shrink-0 h-screen sticky top-0 transition-colors">
       {/* Brand Header */}
       <div className="p-5 flex items-center justify-between border-b border-[#e2e8f0] dark:border-[#23293d]">
         <div className="flex items-center gap-3">
@@ -59,14 +62,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
             <div className="flex items-center gap-2">
               <span className="font-extrabold text-base tracking-tight text-[#172033] dark:text-[#f8f9fc]">StudyDashboard</span>
             </div>
-            <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Cloud Study Platform</p>
+            <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Personal Study Cloud</p>
           </div>
         </div>
       </div>
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
-        {navItems.filter(item => item.show !== false).map(item => {
+        {navItems.filter(item => item.show).map(item => {
           const Icon = item.icon;
           const isActive = currentPage === item.id;
           return (
@@ -85,7 +88,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPage, onNavigate }) => 
               </div>
               {item.badge && (
                 <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                  isActive ? 'bg-[#5b5bd6]/10 text-[#5b5bd6]' : 'bg-[#eef2f6] text-[#64748b]'
+                  isActive ? 'bg-[#5b5bd6]/10 text-[#5b5bd6] dark:text-[#8282ea]' : 'bg-[#eef2f6] dark:bg-[#1f2538] text-[#64748b]'
                 }`}>
                   {item.badge}
                 </span>

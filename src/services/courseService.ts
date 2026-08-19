@@ -1,10 +1,20 @@
-import { supabase, type CloudCourse, type CloudTopic } from '../lib/supabase';
+import { supabase, type CloudCourse, type CloudSubject, type CloudTopic, type CloudSyllabusDocument } from '../lib/supabase';
+import type { ExtractedTopicSection } from '../types';
 
 export interface CourseInput {
   name: string;
   description?: string;
+  year?: number;
   dailyGoalMinutes: number;
   color?: string;
+}
+
+export interface SubjectInput {
+  courseId: string;
+  name: string;
+  description?: string;
+  code?: string;
+  sortOrder?: number;
 }
 
 export const courseService = {
@@ -38,6 +48,7 @@ export const courseService = {
         user_id: user.id,
         name: input.name.trim(),
         description: input.description?.trim(),
+        year: input.year || 2027,
         daily_goal_minutes: input.dailyGoalMinutes,
         color: input.color || '#5b5bd6',
       })
@@ -61,6 +72,7 @@ export const courseService = {
       .update({
         ...(updates.name && { name: updates.name.trim() }),
         ...(updates.description !== undefined && { description: updates.description.trim() }),
+        ...(updates.year !== undefined && { year: updates.year }),
         ...(updates.dailyGoalMinutes && { daily_goal_minutes: updates.dailyGoalMinutes }),
         ...(updates.color && { color: updates.color }),
         updated_at: new Date().toISOString(),
@@ -71,7 +83,7 @@ export const courseService = {
     return !error;
   },
 
-  // Archive a course
+  // Archive / Delete course
   async archiveCourse(id: string): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
@@ -85,7 +97,6 @@ export const courseService = {
     return !error;
   },
 
-  // Delete a course permanently
   async deleteCourse(id: string): Promise<boolean> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return false;
@@ -99,18 +110,79 @@ export const courseService = {
     return !error;
   },
 
-  // Topics CRUD
-  async getTopics(courseId: string): Promise<CloudTopic[]> {
+  // ================= SUBJECTS / PAPERS =================
+  async getSubjects(courseId: string): Promise<CloudSubject[]> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
     const { data, error } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('course_id', courseId)
+      .order('sort_order', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching subjects:', error);
+      return [];
+    }
+    return data || [];
+  },
+
+  async createSubject(input: SubjectInput): Promise<CloudSubject | null> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data, error } = await supabase
+      .from('subjects')
+      .insert({
+        user_id: user.id,
+        course_id: input.courseId,
+        name: input.name.trim(),
+        description: input.description?.trim() || null,
+        code: input.code?.trim() || null,
+        sort_order: input.sortOrder || 0,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating subject:', error);
+      return null;
+    }
+    return data;
+  },
+
+  async deleteSubject(id: string): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from('subjects')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    return !error;
+  },
+
+  // ================= TOPICS & LESSONS =================
+  async getTopics(courseId: string, subjectId?: string | null): Promise<CloudTopic[]> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    let query = supabase
       .from('topics')
       .select('*')
       .eq('user_id', user.id)
       .eq('course_id', courseId)
       .order('sort_order', { ascending: true });
 
+    if (subjectId) {
+      query = query.eq('subject_id', subjectId);
+    }
+
+    const { data, error } = await query;
     if (error) {
       console.error('Error fetching topics:', error);
       return [];
@@ -118,7 +190,14 @@ export const courseService = {
     return data || [];
   },
 
-  async createTopic(courseId: string, name: string, parentTopicId?: string | null, code?: string): Promise<CloudTopic | null> {
+  async createTopic(
+    courseId: string,
+    name: string,
+    subjectId?: string | null,
+    parentTopicId?: string | null,
+    code?: string,
+    sortOrder: number = 0
+  ): Promise<CloudTopic | null> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
 
@@ -127,9 +206,11 @@ export const courseService = {
       .insert({
         user_id: user.id,
         course_id: courseId,
+        subject_id: subjectId || null,
         parent_topic_id: parentTopicId || null,
         name: name.trim(),
         code: code || null,
+        sort_order: sortOrder,
       })
       .select()
       .single();
@@ -139,5 +220,64 @@ export const courseService = {
       return null;
     }
     return data;
+  },
+
+  async deleteTopic(id: string): Promise<boolean> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return false;
+
+    const { error } = await supabase
+      .from('topics')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', user.id);
+
+    return !error;
+  },
+
+  // Save full extracted syllabus hierarchy into Supabase (Topics & Lessons)
+  async saveSyllabusHierarchy(
+    courseId: string,
+    subjectId: string | null,
+    sections: ExtractedTopicSection[],
+    syllabusFileName?: string
+  ): Promise<{ topicsCreated: number; lessonsCreated: number }> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { topicsCreated: 0, lessonsCreated: 0 };
+
+    let topicsCreated = 0;
+    let lessonsCreated = 0;
+
+    for (let i = 0; i < sections.length; i++) {
+      const section = sections[i];
+      // 1. Create Top-Level Topic
+      const parentTopic = await this.createTopic(
+        courseId,
+        section.name,
+        subjectId,
+        null,
+        section.code || `${i + 1}`,
+        i + 1
+      );
+
+      if (parentTopic) {
+        topicsCreated++;
+        // 2. Create sub-lessons under this parent topic
+        for (let j = 0; j < section.lessons.length; j++) {
+          const lesson = section.lessons[j];
+          await this.createTopic(
+            courseId,
+            lesson.name,
+            subjectId,
+            parentTopic.id,
+            lesson.code || `${section.code || i + 1}.${j + 1}`,
+            j + 1
+          );
+          lessonsCreated++;
+        }
+      }
+    }
+
+    return { topicsCreated, lessonsCreated };
   }
 };
