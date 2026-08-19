@@ -3,48 +3,64 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, updateUserSettings } from '../db';
 import { resetAllProgressToZero } from '../db/seed';
 import { useUser } from '../context/UserContext';
-import { isSupabaseConfigured } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { ResetModal } from '../components/common/ResetModal';
+import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import {
   Mail,
   Database,
   Download,
   ShieldCheck,
   RotateCcw,
-  Flame,
+  Sun,
+  Moon,
+  Clock,
   CheckCircle2,
+  Sliders,
 } from 'lucide-react';
 import { sendDailySummaryEmail } from '../services/emailService';
 import { exportBackupData } from '../services/backupService';
 import { format, startOfDay, endOfDay } from 'date-fns';
 
-export const Settings: React.FC = () => {
+export const SettingsContent: React.FC = () => {
   const { activeProfileKey, currentUser, switchUser } = useUser();
   
-  // Direct table query (avoid async functions inside useLiveQuery)
   const settings = useLiveQuery(() => db.userSettings.get(currentUser.id), [currentUser.id]);
 
   const [emailStatus, setEmailStatus] = useState<string | null>(null);
-  const [recipientEmail, setRecipientEmail] = useState(currentUser.email);
+  const [recipientEmail, setRecipientEmail] = useState(currentUser.email || '');
   const [isReminder15m, setIsReminder15m] = useState(true);
   const [isDaily10pm, setIsDaily10pm] = useState(true);
+  const [dailyGoalHours, setDailyGoalHours] = useState<number>(3);
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  });
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
-  // Sync settings when loaded
   useEffect(() => {
     if (settings) {
-      setRecipientEmail(settings.recipientEmail || currentUser.email);
-      setIsReminder15m(settings.reminder15minEnabled);
-      setIsDaily10pm(settings.dailySummary10pmEnabled);
+      setRecipientEmail(settings.recipientEmail || currentUser.email || '');
+      setIsReminder15m(settings.reminder15minEnabled ?? true);
+      setIsDaily10pm(settings.dailySummary10pmEnabled ?? true);
     } else {
-      setRecipientEmail(currentUser.email);
+      setRecipientEmail(currentUser.email || '');
     }
   }, [settings, currentUser]);
+
+  const handleThemeChange = (mode: 'dark' | 'light') => {
+    setThemeMode(mode);
+    if (mode === 'dark') {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('studydashboard_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('studydashboard_theme', 'light');
+    }
+  };
 
   const handleSaveSettings = async () => {
     await updateUserSettings(currentUser.id, {
@@ -56,9 +72,8 @@ export const Settings: React.FC = () => {
     setTimeout(() => setEmailStatus(null), 3000);
   };
 
-  // Test 10 PM Daily Summary Email trigger
   const handleTest10pmSummary = async () => {
-    setEmailStatus('Generating actual study data and dispatching 10 PM Daily Summary...');
+    setEmailStatus('Generating study statistics and dispatching 10 PM Daily Summary...');
 
     const todayStart = startOfDay(new Date()).getTime();
     const todayEnd = endOfDay(new Date()).getTime();
@@ -118,7 +133,6 @@ export const Settings: React.FC = () => {
     setTimeout(() => setEmailStatus(null), 5000);
   };
 
-  // Full JSON Backup Export
   const handleExportBackup = async () => {
     const jsonStr = await exportBackupData();
     const blob = new Blob([jsonStr], { type: 'application/json' });
@@ -135,35 +149,37 @@ export const Settings: React.FC = () => {
   return (
     <div className="max-w-4xl space-y-6 pb-12 animate-fade-in">
       <div>
-        <h2 className="text-xl font-bold text-white tracking-tight">Settings & Notifications</h2>
-        <p className="text-xs text-slate-400">Manage account, automated Asia/Kathmandu email summaries, streaks, and backups.</p>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Settings & Preferences</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          Manage profile, timezone, themes, automated email reminders, and study progress.
+        </p>
       </div>
 
       {resetMessage && (
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2 animate-fade-in">
           <CheckCircle2 className="w-4 h-4" />
           <span>{resetMessage}</span>
         </div>
       )}
 
-      {/* 1. Active Profile Switcher Box */}
-      <Card className="p-6 border-slate-800 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-brand-400" />
-          <span>Active User Profile</span>
+      {/* 1. Active Profile Section */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+          <span>Profile & Active User</span>
         </h3>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-3">
             <img
               src={currentUser.avatarUrl}
               alt={currentUser.name}
-              className="w-12 h-12 rounded-full border-2 border-brand-500 bg-slate-800"
+              className="w-12 h-12 rounded-full border-2 border-brand-500 bg-slate-100 dark:bg-slate-800"
             />
             <div>
-              <p className="text-base font-bold text-white">{currentUser.name}</p>
-              <p className="text-xs text-slate-400">{currentUser.email}</p>
-              <Badge variant="brand" className="mt-1">Active Study Partner</Badge>
+              <p className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">{currentUser.email}</p>
+              <Badge variant="brand" className="mt-1">Active Study Profile</Badge>
             </div>
           </div>
 
@@ -186,7 +202,81 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 2. Data & Progress (Reset All Study Progress) */}
+      {/* 2. Study Preferences & Timezone */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <Sliders className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+          <span>Study Preferences</span>
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Timezone (Real Calendar Rollover)
+            </label>
+            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white">
+              <Clock className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+              <span>Asia/Kathmandu (UTC+5:45)</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">Daily progress rolls over at 00:00 Nepal Time.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
+              Default Daily Goal
+            </label>
+            <select
+              value={dailyGoalHours}
+              onChange={e => setDailyGoalHours(Number(e.target.value))}
+              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
+            >
+              <option value={2}>2 Hours / day</option>
+              <option value={3}>3 Hours / day</option>
+              <option value={4}>4 Hours / day</option>
+              <option value={5}>5 Hours / day</option>
+              <option value={6}>6 Hours / day</option>
+            </select>
+          </div>
+        </div>
+      </Card>
+
+      {/* 3. Appearance (Light / Dark Theme) */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <Sun className="w-4 h-4 text-amber-500" />
+          <span>Appearance & Color Theme</span>
+        </h3>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => handleThemeChange('light')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+              themeMode === 'light'
+                ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
+                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <Sun className="w-4 h-4 text-amber-500" />
+            <span>Light Mode (Clean Slate)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleThemeChange('dark')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
+              themeMode === 'dark'
+                ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
+                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+            }`}
+          >
+            <Moon className="w-4 h-4 text-indigo-400" />
+            <span>Dark Mode (Midnight Slate)</span>
+          </button>
+        </div>
+      </Card>
+
+      {/* 4. Data & Progress (Reset All Study Progress) */}
       <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
         <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <RotateCcw className="w-4 h-4 text-rose-500" />
@@ -210,7 +300,7 @@ export const Settings: React.FC = () => {
           <Button
             variant="outline"
             size="sm"
-            className="border-rose-500/50 text-rose-400 hover:bg-rose-500/10"
+            className="border-rose-500/50 text-rose-500 hover:bg-rose-500/10"
             leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
             onClick={async () => {
               if (window.confirm("Wipe ALL study history, streaks, and attempts for BOTH Siddhartha & Shilpa back to 0?")) {
@@ -225,37 +315,37 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 3. Automated Email Reminders & 10 PM Summary Settings */}
-      <Card className="p-6 border-slate-800 space-y-5">
+      {/* 5. Automated Email Reminders & 10 PM Summary Settings */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-5">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Mail className="w-4 h-4 text-blue-400" />
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Mail className="w-4 h-4 text-blue-500" />
               <span>Automated Email Reminders & Daily Summary</span>
             </h3>
-            <p className="text-xs text-slate-400">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>
           </div>
         </div>
 
         {emailStatus && (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
             {emailStatus}
           </div>
         )}
 
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Recipient Email Address</label>
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Recipient Email Address</label>
             <input
               type="email"
               value={recipientEmail}
               onChange={e => setRecipientEmail(e.target.value)}
-              className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white"
+              className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
             />
           </div>
 
           <div className="space-y-3 pt-2">
-            <label className="flex items-center gap-3 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
                 checked={isReminder15m}
@@ -265,7 +355,7 @@ export const Settings: React.FC = () => {
               <span>Send 15-minute advance reminder before scheduled study sessions</span>
             </label>
 
-            <label className="flex items-center gap-3 text-xs text-slate-300 cursor-pointer">
+            <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
               <input
                 type="checkbox"
                 checked={isDaily10pm}
@@ -276,7 +366,7 @@ export const Settings: React.FC = () => {
             </label>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-800">
+          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button variant="primary" size="sm" onClick={handleSaveSettings}>
               Save Email Preferences
             </Button>
@@ -287,15 +377,15 @@ export const Settings: React.FC = () => {
         </div>
       </Card>
 
-      {/* 4. Local Backup & Export */}
-      <Card className="p-6 border-slate-800 space-y-4">
-        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-          <Database className="w-4 h-4 text-blue-400" />
+      {/* 6. Local Backup & Export */}
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+          <Database className="w-4 h-4 text-blue-500" />
           <span>Local Backup & Export</span>
         </h3>
 
         {backupStatus && (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
+          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
             {backupStatus}
           </div>
         )}
@@ -322,5 +412,13 @@ export const Settings: React.FC = () => {
         }}
       />
     </div>
+  );
+};
+
+export const Settings: React.FC = () => {
+  return (
+    <ErrorBoundary fallbackTitle="Settings unavailable">
+      <SettingsContent />
+    </ErrorBoundary>
   );
 };

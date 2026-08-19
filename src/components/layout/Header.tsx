@@ -19,7 +19,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) => {
   const { theme, toggleTheme } = useTheme();
   const { activeProfileKey, currentUser, switchUser } = useUser();
-  const { openModal, isRunning, activeTargetName, formattedTime } = useStudyTimer();
+  const { openModal, isRunning, isPaused, activeTargetName, formattedTime } = useStudyTimer();
 
   const pageTitles: Record<PageId, { title: string; subtitle: string }> = {
     dashboard: { title: 'Dashboard', subtitle: `Welcome back, ${currentUser.name}. Track your daily targets.` },
@@ -60,14 +60,23 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
         {/* Global Study Timer Trigger */}
         <button
           onClick={openModal}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shadow-sm ${
             isRunning
-              ? 'bg-emerald-600 hover:bg-emerald-500 text-white animate-pulse shadow-md shadow-emerald-500/20'
-              : 'bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20'
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 animate-pulse'
+              : isPaused
+              ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-500/20'
+              : 'bg-brand-600 hover:bg-brand-500 text-white shadow-brand-500/20'
           }`}
+          title={isRunning || isPaused ? 'Click to open study timer controls' : 'Start a focused study timer'}
         >
           <Timer className="w-4 h-4" />
-          <span>{isRunning ? `${activeTargetName || 'Studying'}: ${formattedTime}` : 'Start Study'}</span>
+          <span>
+            {isRunning
+              ? `● ${activeTargetName || 'Studying'}: ${formattedTime}`
+              : isPaused
+              ? `❚❚ ${activeTargetName || 'Paused'}: ${formattedTime}`
+              : 'Start Study'}
+          </span>
         </button>
 
         {/* User Switch Pill */}

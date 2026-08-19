@@ -16,6 +16,8 @@ import { Settings } from './pages/Settings';
 
 import { calculateKathmanduStreak } from './utils/dateUtils';
 
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+
 export const App: React.FC = () => {
   const { currentUser } = useUser();
   const [currentPage, setCurrentPage] = useState<PageId>('dashboard');
@@ -94,7 +96,9 @@ export const App: React.FC = () => {
       onNavigate={handleNavigate}
       studyStreak={studyStreak}
     >
-      {renderScreen()}
+      <ErrorBoundary fallbackTitle="Unable to load page">
+        {renderScreen()}
+      </ErrorBoundary>
     </AppLayout>
   );
 };
