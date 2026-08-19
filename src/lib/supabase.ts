@@ -3,13 +3,26 @@ import { createClient } from '@supabase/supabase-js';
 const metaEnv = typeof import.meta !== 'undefined' ? (import.meta as any).env || {} : {};
 const procEnv = typeof process !== 'undefined' ? process.env || {} : {};
 
-export const supabaseUrl = metaEnv.VITE_SUPABASE_URL || procEnv.VITE_SUPABASE_URL || 'https://oiorstuenjiztoqzbyvt.supabase.co';
-export const supabasePublishableKey = 
+function sanitizeConfigVal(val: any): string {
+  if (typeof val !== 'string') return '';
+  let clean = val.replace(/[\r\n\t]/g, '').replace(/^['"]+|['"]+$/g, '').trim();
+  // Strip accidental key prefixes if the entire line was copied
+  if (clean.includes('=')) {
+    clean = clean.split('=').pop()?.trim() || clean;
+  }
+  return clean;
+}
+
+const rawUrl = metaEnv.VITE_SUPABASE_URL || procEnv.VITE_SUPABASE_URL || 'https://oiorstuenjiztoqzbyvt.supabase.co';
+const rawKey = 
   metaEnv.VITE_SUPABASE_PUBLISHABLE_KEY || 
   metaEnv.VITE_SUPABASE_ANON_KEY || 
   procEnv.VITE_SUPABASE_PUBLISHABLE_KEY || 
   procEnv.VITE_SUPABASE_ANON_KEY || 
   'sb_publishable__sjEkh85BxZnm9V_FAydLg_58mtppgc';
+
+export const supabaseUrl = sanitizeConfigVal(rawUrl);
+export const supabasePublishableKey = sanitizeConfigVal(rawKey);
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl && 
