@@ -214,3 +214,18 @@ export function getKathmanduMonthlyAggregates(
 
   return result;
 }
+
+/**
+ * Returns today's start and end Date objects in Asia/Kathmandu.
+ */
+export function getNepalTodayRange(): { start: Date; end: Date } {
+  const now = new Date();
+  const todayStr = getKathmanduTodayStr();
+  const [y, m, d] = todayStr.split('-').map(Number);
+  
+  // Nepal is UTC+5:45 (offset = -345 minutes)
+  const start = new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - (5 * 60 + 45) * 60 * 1000);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000 - 1);
+  return { start, end };
+}
+

@@ -33,7 +33,7 @@ type SettingsTab =
   | 'data';
 
 export const SettingsContent: React.FC = () => {
-  const { activeProfileKey, currentUser, switchUser } = useUser();
+  const { currentUser } = useUser();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
   const settings = useLiveQuery(() => db.userSettings.get(currentUser.id), [currentUser.id]);
@@ -193,31 +193,25 @@ export const SettingsContent: React.FC = () => {
 
       {/* ================= TAB 1: PROFILE ================= */}
       {activeTab === 'profile' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Active User Profile</h3>
+        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-6">
           <div className="flex items-center gap-4">
             <img
               src={currentUser.avatarUrl}
               alt={currentUser.name}
-              className="w-16 h-16 rounded-full border border-slate-300 dark:border-slate-700 shadow-xs"
+              className="w-16 h-16 rounded-full border border-slate-300 dark:border-slate-700 object-cover shadow-xs"
             />
             <div>
               <h4 className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</h4>
               <p className="text-xs text-slate-500">{currentUser.email}</p>
-              <Badge variant="brand" className="mt-1.5">
-                Profile: {activeProfileKey === 'siddhartha' ? 'Siddhartha (RBB IT Level 5)' : 'Shilpa (Sangathit Sanstha)'}
-              </Badge>
+              <div className="flex items-center gap-2 mt-1.5">
+                <Badge variant="brand">
+                  Role: {currentUser.role}
+                </Badge>
+                <span className="text-xs text-slate-500">
+                  Goal: {Math.floor(currentUser.dailyGoalMinutes / 60)}h {currentUser.dailyGoalMinutes % 60}m/day
+                </span>
+              </div>
             </div>
-          </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => switchUser(activeProfileKey === 'siddhartha' ? 'shilpa' : 'siddhartha')}
-            >
-              Switch to {activeProfileKey === 'siddhartha' ? 'Shilpa' : 'Siddhartha'}
-            </Button>
           </div>
         </Card>
       )}

@@ -1,45 +1,44 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { USER_PROFILES, type ActiveUserProfile, type UserProfile } from '../lib/supabase';
-import { seedNepalInitialData, resetAllProgressToZero } from '../db/seed';
+import React, { createContext, useContext } from 'react';
+import { useAuth } from './AuthContext';
+import type { Profile } from '../lib/supabase';
+
+export interface UserProfileDisplay {
+  id: string;
+  name: string;
+  email: string;
+  avatarUrl: string;
+  role: 'MAIN_ADMIN' | 'SUB_ADMIN' | 'USER';
+  dailyGoalMinutes: number;
+}
 
 interface UserContextType {
-  activeProfileKey: ActiveUserProfile;
-  currentUser: UserProfile;
-  switchUser: (profile: ActiveUserProfile) => void;
+  currentUser: UserProfileDisplay;
+  profile: Profile | null;
+  isAdmin: boolean;
+  isSubAdmin: boolean;
+  canAccessAdmin: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [activeProfileKey, setActiveProfileKey] = useState<ActiveUserProfile>(() => {
-    const raw = localStorage.getItem('studydashboard_active_user') || localStorage.getItem('studyos_active_user');
-    if (raw === 'shilpa' || raw === 'user2') return 'shilpa';
-    return 'siddhartha';
-  });
+  const { user, profile, role } = useAuth();
 
-  const currentUser = USER_PROFILES[activeProfileKey] || USER_PROFILES.siddhartha;
-
-  const switchUser = (profile: ActiveUserProfile) => {
-    setActiveProfileKey(profile);
-    localStorage.setItem('studydashboard_active_user', profile);
+  const currentUser: UserProfileDisplay = {
+    id: user?.id || 'anonymous-user',
+    name: profile?.display_name || user?.email?.split('@')[0] || 'Student',
+    email: user?.email || '',
+    avatarUrl: profile?.avatar_url || (profile?.display_name?.toLowerCase().includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png'),
+    role: role,
+    dailyGoalMinutes: profile?.daily_goal_minutes || 120,
   };
 
-  useEffect(() => {
-    // Reset to clean Day 0 state (targets & questions preserved, sessions & streaks reset to 0)
-    const SEED_VERSION = 'studydashboard_clean_day0_v5';
-    const lastSeed = localStorage.getItem('studydashboard_seed_version');
-    if (lastSeed !== SEED_VERSION) {
-      seedNepalInitialData(true).then(async () => {
-        await resetAllProgressToZero('all');
-        localStorage.setItem('studydashboard_seed_version', SEED_VERSION);
-      });
-    } else {
-      seedNepalInitialData(false);
-    }
-  }, []);
+  const isAdmin = role === 'MAIN_ADMIN';
+  const isSubAdmin = role === 'SUB_ADMIN';
+  const canAccessAdmin = isAdmin || isSubAdmin;
 
   return (
-    <UserContext.Provider value={{ activeProfileKey, currentUser, switchUser }}>
+    <UserContext.Provider value={{ currentUser, profile, isAdmin, isSubAdmin, canAccessAdmin }}>
       {children}
     </UserContext.Provider>
   );

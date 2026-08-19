@@ -1,25 +1,27 @@
-import React, { useMemo } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { useUser } from '../context/UserContext';
 import { useStudyTimer } from '../context/StudyTimerContext';
+import { courseService } from '../services/courseService';
+import { studySessionService } from '../services/studySessionService';
+import { practiceService } from '../services/practiceService';
+import { plannerService } from '../services/plannerService';
+import { type CloudCourse, type CloudStudySession, type CloudPlannerSession } from '../lib/supabase';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
-import { Badge } from '../components/common/Badge';
 import { ProgressBar } from '../components/common/ProgressBar';
 import {
   Play,
   Clock,
   BookOpen,
-  FileText,
   Calendar,
   ChevronRight,
   TrendingUp,
   Target as TargetIcon,
   CheckCircle2,
   BarChart3,
-  Layers,
   Upload,
+  WifiOff,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,180 +31,206 @@ import {
   YAxis,
   Tooltip,
 } from 'recharts';
-import {
-  isKathmanduToday,
-  getKathmanduTodayStr,
-  getKathmanduDailyAggregates,
-} from '../utils/dateUtils';
+import { format, subDays } from 'date-fns';
 import type { PageId } from '../components/layout/Sidebar';
-import type { Target } from '../types';
 
 interface DashboardProps {
-  onNavigate: (page: PageId, params?: any) => void;
+  onNavigate: (page: PageId, state?: any) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
   const { currentUser } = useUser();
   const { startSession, openModal: openTimerModal } = useStudyTimer();
-  const todayStr = getKathmanduTodayStr();
 
-  // 1. Live Queries for Current User
-  const targets = useLiveQuery(
-    () => db.targets.where('userId').equals(currentUser.id).and(t => !t.isArchived).toArray(),
-    [currentUser.id]
-  ) || [];
+  const [courses, setCourses] = useState<CloudCourse[]>([]);
+  const [todaySessions, setTodaySessions] = useState<CloudStudySession[]>([]);
+  const [weekSessions, setWeekSessions] = useState<CloudStudySession[]>([]);
+  const [upcomingSchedules, setUpcomingSchedules] = useState<CloudPlannerSession[]>([]);
+  const [todayAttemptCount, setTodayAttemptCount] = useState(0);
+  const [todayCorrectCount, setTodayCorrectCount] = useState(0);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const studySessions = useLiveQuery(
-    () => db.studySessions.where('userId').equals(currentUser.id).toArray(),
-    [currentUser.id]
-  ) || [];
+  // Live Asia/Kathmandu Clock
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const attempts = useLiveQuery(
-    () => db.attempts.where('userId').equals(currentUser.id).toArray(),
-    [currentUser.id]
-  ) || [];
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
 
-  const dailyAllocations = useLiveQuery(
-    () => db.dailyAllocations.where('userId').equals(currentUser.id).and(a => a.date === todayStr).toArray(),
-    [currentUser.id, todayStr]
-  ) || [];
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
-  const upcomingSchedules = useLiveQuery(
-    () => db.studySchedules
-      .where('userId').equals(currentUser.id)
-      .and(s => s.date === todayStr && !s.isCompleted)
-      .toArray(),
-    [currentUser.id, todayStr]
-  ) || [];
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
-  // 2. Calculations for Today's Stats (Strict Asia/Kathmandu Day)
-  const todaySessions = useMemo(() => studySessions.filter(s => isKathmanduToday(s.startTime)), [studySessions]);
-  const todayAttempts = useMemo(() => attempts.filter(a => isKathmanduToday(a.timestamp)), [attempts]);
+  // Fetch Cloud Dashboard Data
+  useEffect(() => {
+    let isMounted = true;
 
-  // Studied minutes per target today
-  const targetStudiedMinutes: Record<string, number> = useMemo(() => {
-    const map: Record<string, number> = {};
-    targets.forEach(t => {
-      map[t.id] = todaySessions
-        .filter(s => s.targetId === t.id)
-        .reduce((sum, s) => sum + (s.focusedMinutes || 0), 0);
-    });
-    return map;
-  }, [targets, todaySessions]);
+    async function loadDashboardData() {
+      try {
+        const [loadedCourses, todaySess, weekSess, practiceSess, plannerSess] = await Promise.all([
+          courseService.getCourses(),
+          studySessionService.getTodaySessions(),
+          studySessionService.getLast7DaysSessions(),
+          practiceService.getTodayPracticeSessions(),
+          plannerService.getPlannerSessions(),
+        ]);
 
-  const totalStudiedMinutesToday = Object.values(targetStudiedMinutes).reduce((a, b) => a + b, 0);
+        if (!isMounted) return;
 
-  // Planned minutes per target today
-  const targetPlannedMinutes: Record<string, number> = useMemo(() => {
-    const map: Record<string, number> = {};
-    targets.forEach(t => {
-      const alloc = dailyAllocations.find(a => a.targetId === t.id);
-      map[t.id] = alloc ? alloc.plannedMinutes : t.dailyGoalMinutes;
-    });
-    return map;
-  }, [targets, dailyAllocations]);
+        setCourses(loadedCourses);
+        setTodaySessions(todaySess);
+        setWeekSessions(weekSess);
 
-  const totalPlannedMinutesToday = Object.values(targetPlannedMinutes).reduce((a, b) => a + b, 0) || 120;
-  const todayGoalCompletion = Math.min(100, Math.round((totalStudiedMinutesToday / totalPlannedMinutesToday) * 100));
+        // Aggregate practice attempts
+        let totalAttempts = 0;
+        let totalCorrect = 0;
+        practiceSess.forEach(p => {
+          totalAttempts += (p.correct_count + p.wrong_count + p.unanswered_count);
+          totalCorrect += p.correct_count;
+        });
+        setTodayAttemptCount(totalAttempts);
+        setTodayCorrectCount(totalCorrect);
+
+        // Upcoming planner sessions
+        const nowIso = new Date().toISOString();
+        const future = plannerSess.filter(s => s.start_time >= nowIso && !s.is_completed);
+        setUpcomingSchedules(future.slice(0, 3));
+      } catch (err) {
+        console.error('Error loading dashboard cloud data:', err);
+      }
+    }
+
+    loadDashboardData();
+    return () => { isMounted = false; };
+  }, [currentUser.id]);
+
+  // Calculations for Today
+  const totalStudiedMinutesToday = useMemo(() => {
+    return Math.round(todaySessions.reduce((sum, s) => sum + s.duration_seconds, 0) / 60);
+  }, [todaySessions]);
+
+  const totalPlannedMinutesToday = currentUser.dailyGoalMinutes || 120;
+  const todayGoalCompletion = Math.min(100, Math.round((totalStudiedMinutesToday / (totalPlannedMinutesToday || 1)) * 100));
   const remainingMinutes = Math.max(0, totalPlannedMinutesToday - totalStudiedMinutesToday);
 
-  // MCQ Stats Today
-  const todayAttemptCount = todayAttempts.length;
-  const todayCorrectCount = todayAttempts.filter(a => a.isCorrect).length;
-  const todayAccuracy = todayAttemptCount > 0 ? Math.round((todayCorrectCount / todayAttemptCount) * 100) : null;
+  const todayAccuracy = todayAttemptCount > 0
+    ? Math.round((todayCorrectCount / todayAttemptCount) * 100)
+    : null;
 
-  // Greeting Time of Day
-  const currentHour = new Date().getHours();
-  const timeOfDayGreeting = currentHour < 12 ? 'Good morning' : currentHour < 17 ? 'Good afternoon' : 'Good evening';
+  // Format Time of Day Greeting
+  const nepaliTimeFormatted = useMemo(() => {
+    return format(currentTime, 'EEEE, d MMMM yyyy · h:mm a');
+  }, [currentTime]);
 
-  // 3. Weekly Progress Data (Last 7 Days Focus Time)
-  const dailyAggregates = useMemo(() => getKathmanduDailyAggregates(studySessions, attempts, 7), [studySessions, attempts]);
-  const last7DaysChartData = useMemo(() => dailyAggregates.map(d => ({
-    day: d.dayLabel,
-    fullDate: d.formattedDate,
-    hours: Number((d.focusedMinutes / 60).toFixed(1)),
-    minutes: d.focusedMinutes,
-    mcqs: d.questionsAttempted,
-  })), [dailyAggregates]);
+  const timeOfDayGreeting = useMemo(() => {
+    const hours = currentTime.getHours();
+    if (hours < 12) return 'Good morning';
+    if (hours < 17) return 'Good afternoon';
+    return 'Good evening';
+  }, [currentTime]);
 
-  const totalWeeklyFocusMinutes = dailyAggregates.reduce((acc, d) => acc + d.focusedMinutes, 0);
-  const weeklyGoalTargetMinutes = totalPlannedMinutesToday * 7 || 840;
-  const weeklyGoalPct = Math.min(100, Math.round((totalWeeklyFocusMinutes / weeklyGoalTargetMinutes) * 100));
+  // Last 7 Days Focus Chart Data
+  const last7DaysChartData = useMemo(() => {
+    return Array.from({ length: 7 }).map((_, i) => {
+      const targetDate = subDays(new Date(), 6 - i);
+      const dayLabel = format(targetDate, 'EEE');
+      const dateString = format(targetDate, 'yyyy-MM-dd');
 
-  // Weekly study minutes per target (Last 7 Days)
-  const targetWeeklyMinutes: Record<string, number> = useMemo(() => {
-    const map: Record<string, number> = {};
-    const sevenDaysAgo = Date.now() - 7 * 86400000;
-    const weekSessions = studySessions.filter(s => s.startTime >= sevenDaysAgo);
-    targets.forEach(t => {
-      map[t.id] = weekSessions
-        .filter(s => s.targetId === t.id)
-        .reduce((sum, s) => sum + (s.focusedMinutes || 0), 0);
+      const dayMins = weekSessions
+        .filter(s => s.started_at.startsWith(dateString))
+        .reduce((sum, s) => sum + s.duration_seconds, 0) / 60;
+
+      return {
+        day: dayLabel,
+        minutes: Math.round(dayMins),
+        hours: Number((dayMins / 60).toFixed(1)),
+        fullDate: format(targetDate, 'MMM d'),
+      };
     });
-    return map;
-  }, [targets, studySessions]);
+  }, [weekSessions]);
 
-  const maxWeeklyTargetMins = Math.max(1, ...Object.values(targetWeeklyMinutes));
+  const totalWeeklyFocusMinutes = useMemo(() => {
+    return last7DaysChartData.reduce((acc, curr) => acc + curr.minutes, 0);
+  }, [last7DaysChartData]);
 
-  // Format Helper
   const formatMins = (mins: number) => {
-    if (mins === 0) return '0m';
     const h = Math.floor(mins / 60);
     const m = mins % 60;
     return h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
   };
 
-  const handleStartTargetFocus = (target: Target) => {
-    startSession(target.id);
+  const handleStartCourseFocus = (course: CloudCourse) => {
+    startSession(course.id);
     openTimerModal();
   };
 
   return (
-    <div className="space-y-8 animate-fade-in pb-16 max-w-7xl mx-auto">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc]">
+      {/* Offline Alert Banner */}
+      {!isOnline && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-2.5">
+          <WifiOff className="w-4 h-4 shrink-0" />
+          <span>You're offline. StudyDashboard data is safely stored in the cloud. Reconnect to continue.</span>
+        </div>
+      )}
+
       {/* ================= HERO: TODAY'S FOCUS ================= */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-brand-50/70 via-slate-50 to-white dark:from-slate-900 dark:via-slate-900/90 dark:to-slate-850 p-6 sm:p-8 border border-brand-200/80 dark:border-slate-800 shadow-sm">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-          <div className="space-y-2.5 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-100/80 dark:bg-brand-950/60 text-xs font-bold text-brand-800 dark:text-brand-300 border border-brand-300/60 dark:border-brand-800/80">
-              <span className="w-2 h-2 rounded-full bg-brand-600 dark:bg-brand-400 animate-pulse" />
-              <span>Asia/Kathmandu Time (UTC+5:45)</span>
+      <div className="rounded-2xl bg-[#fbfcfe] dark:bg-[#141824] p-6 sm:p-7 border border-[#e2e8f0] dark:border-[#23293d] shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+          <div className="space-y-2 max-w-xl">
+            {/* Live Clock & Nepal Time */}
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#eef2f6] dark:bg-[#1f2538] text-xs font-semibold text-[#64748b] dark:text-[#9496a8] border border-[#e2e8f0] dark:border-[#2b334d]">
+              <span className="w-2 h-2 rounded-full bg-[#5b5bd6] animate-pulse" />
+              <span>{nepaliTimeFormatted}</span>
             </div>
 
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight">
               {timeOfDayGreeting}, {currentUser.name.split(' ')[0]} 👋
             </h1>
 
-            <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 font-medium leading-relaxed">
+            <p className="text-xs sm:text-sm text-[#64748b] dark:text-[#9496a8] font-medium leading-relaxed">
               {totalStudiedMinutesToday > 0 ? (
                 <>
-                  <span className="font-bold text-brand-700 dark:text-brand-400">{formatMins(totalStudiedMinutesToday)}</span> focused today
+                  <span className="font-bold text-[#5b5bd6] dark:text-[#8282ea]">{formatMins(totalStudiedMinutesToday)}</span> focused today
                   {remainingMinutes > 0 ? (
-                    <> • <span className="font-bold text-slate-900 dark:text-white">{formatMins(remainingMinutes)} remaining</span> to reach daily goal</>
+                    <> · <span className="font-bold text-[#172033] dark:text-white">{formatMins(remainingMinutes)} remaining</span> to reach your daily goal</>
                   ) : (
-                    <> • <span className="text-emerald-600 dark:text-emerald-400 font-bold">🎉 Daily goal achieved!</span></>
+                    <> · <span className="text-[#12b76a] font-bold">🎉 Daily goal achieved!</span></>
                   )}
                 </>
               ) : (
-                <>You haven't logged study focus today. Ready to begin your session?</>
+                <>You haven't logged a study session today. Start small and build momentum.</>
               )}
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Primary Action Button */}
             <Button
               variant="primary"
               size="lg"
-              className="font-bold shadow-md text-white"
+              className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold shadow-xs px-6"
               leftIcon={<Play className="w-4 h-4 fill-white" />}
               onClick={() => openTimerModal()}
             >
               Focus Now
             </Button>
+
+            {/* Secondary Quieter Actions */}
             <Button
               variant="outline"
               size="lg"
-              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 font-bold shadow-xs"
-              leftIcon={<BookOpen className="w-4 h-4 text-brand-600 dark:text-brand-400" />}
+              className="bg-white dark:bg-[#181d2f] hover:bg-[#f8fafc] text-[#334155] dark:text-[#cbd5e1] border-[#e2e8f0] dark:border-[#2b334d] font-semibold text-xs shadow-xs"
+              leftIcon={<BookOpen className="w-4 h-4 text-[#5b5bd6]" />}
               onClick={() => onNavigate('practice')}
             >
               Practice MCQs
@@ -210,8 +238,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Button
               variant="outline"
               size="lg"
-              className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 font-bold shadow-xs"
-              leftIcon={<FileText className="w-4 h-4 text-blue-500" />}
+              className="bg-white dark:bg-[#181d2f] hover:bg-[#f8fafc] text-[#334155] dark:text-[#cbd5e1] border-[#e2e8f0] dark:border-[#2b334d] font-semibold text-xs shadow-xs"
+              leftIcon={<Upload className="w-4 h-4 text-[#0284c7]" />}
               onClick={() => onNavigate('questions', { openUpload: true })}
             >
               Upload PDF
@@ -220,66 +248,58 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* ================= 4 CLEAN SNAPSHOT CARDS (CUBIC STYLE) ================= */}
+      {/* ================= 4 CLEAN SNAPSHOT CARDS ================= */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Focus Time */}
-        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#7f56d9]/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Focus Time</span>
-            <div className="w-9 h-9 rounded-xl bg-[#f4ebff] dark:bg-[#2c1c5f] text-[#7f56d9] flex items-center justify-center shadow-xs">
-              <Clock className="w-4 h-4" />
-            </div>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">Focus Time</span>
+            <Clock className="w-4 h-4 text-[#5b5bd6]" />
           </div>
-          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
+          <div className="text-2xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
             {formatMins(totalStudiedMinutesToday)}
           </div>
-          <p className="text-[11px] text-[#667085] mt-1 font-medium">Goal: {formatMins(totalPlannedMinutesToday)}</p>
+          <p className="text-[11px] text-[#64748b] mt-1 font-medium">Goal: {formatMins(totalPlannedMinutesToday)}</p>
         </Card>
 
         {/* 2. Daily Goal */}
-        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#12b76a]/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Daily Goal</span>
-            <div className="w-9 h-9 rounded-xl bg-[#ecfdf3] dark:bg-[#054f31] text-[#12b76a] flex items-center justify-center shadow-xs">
-              <TargetIcon className="w-4 h-4" />
-            </div>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">Daily Goal</span>
+            <TargetIcon className="w-4 h-4 text-[#12b76a]" />
           </div>
-          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
+          <div className="text-2xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
             {todayGoalCompletion}%
           </div>
-          <div className="mt-2.5">
-            <ProgressBar progress={todayGoalCompletion} size="sm" color={todayGoalCompletion >= 100 ? 'bg-[#12b76a]' : 'bg-[#7f56d9]'} />
+          <div className="mt-2">
+            <ProgressBar progress={todayGoalCompletion} size="sm" color={todayGoalCompletion >= 100 ? 'bg-[#12b76a]' : 'bg-[#5b5bd6]'} />
           </div>
         </Card>
 
         {/* 3. MCQs Today */}
-        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#0284c7]/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">MCQs Today</span>
-            <div className="w-9 h-9 rounded-xl bg-[#f0f9ff] dark:bg-[#0c4a6e] text-[#0284c7] flex items-center justify-center shadow-xs">
-              <BookOpen className="w-4 h-4" />
-            </div>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">MCQs Today</span>
+            <BookOpen className="w-4 h-4 text-[#0284c7]" />
           </div>
-          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
+          <div className="text-2xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
             {todayAttemptCount}
           </div>
-          <p className="text-[11px] text-[#667085] mt-1 font-medium">
+          <p className="text-[11px] text-[#64748b] mt-1 font-medium">
             {todayCorrectCount > 0 ? `${todayCorrectCount} correct answers` : 'No attempts logged today'}
           </p>
         </Card>
 
         {/* 4. Accuracy */}
-        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#f79009]/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Accuracy</span>
-            <div className="w-9 h-9 rounded-xl bg-[#fffaeb] dark:bg-[#4e2d09] text-[#f79009] flex items-center justify-center shadow-xs">
-              <TrendingUp className="w-4 h-4" />
-            </div>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold text-[#64748b] dark:text-[#9496a8] uppercase tracking-wider">Accuracy</span>
+            <TrendingUp className="w-4 h-4 text-[#f79009]" />
           </div>
-          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
+          <div className="text-2xl font-extrabold text-[#172033] dark:text-[#f8f9fc]">
             {todayAccuracy !== null ? `${todayAccuracy}%` : '—'}
           </div>
-          <p className="text-[11px] text-[#667085] mt-1 font-medium">
+          <p className="text-[11px] text-[#64748b] mt-1 font-medium">
             {todayAccuracy !== null ? (todayAccuracy >= 75 ? 'Strong recall' : 'Review recommended') : 'No questions practiced yet'}
           </p>
         </Card>
@@ -287,158 +307,108 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
       {/* ================= MAIN CONTENT GRID ================= */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Today's Study Plan & Focus Shortcuts */}
+        {/* Left 2 Cols: Today's Study Plan */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Today's Study Plan Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-[#101828] dark:text-[#f8f9fc]">Today's Study Plan</h3>
-                <p className="text-xs text-[#475467] dark:text-[#9496a8]">Pick a course or subject to start your focused study session</p>
+                <h3 className="text-base font-bold text-[#172033] dark:text-[#f8f9fc]">Today's Study Plan</h3>
+                <p className="text-xs text-[#64748b] dark:text-[#9496a8]">Pick a course or subject to start your focused study session</p>
               </div>
               <button
                 onClick={() => onNavigate('targets')}
-                className="text-xs font-bold text-[#6941c6] dark:text-[#b692f6] hover:underline flex items-center gap-1"
+                className="text-xs font-bold text-[#5b5bd6] dark:text-[#8282ea] hover:underline flex items-center gap-1"
               >
                 <span>Manage Courses</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-              {targets.map(target => {
-                const studied = targetStudiedMinutes[target.id] || 0;
-                const planned = targetPlannedMinutes[target.id] || target.dailyGoalMinutes;
-                const pct = Math.min(100, Math.round((studied / planned) * 100));
-                const isComplete = studied >= planned;
-
-                return (
+            {courses.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {courses.map(course => (
                   <Card
-                    key={target.id}
-                    className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4 hover:border-[#7f56d9]/50 transition-all"
+                    key={course.id}
+                    className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-3 hover:border-[#5b5bd6]/40 transition-all"
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
                         <span
                           className="w-3 h-3 rounded-full shrink-0"
-                          style={{ backgroundColor: target.color || '#7f56d9' }}
+                          style={{ backgroundColor: course.color || '#5b5bd6' }}
                         />
                         <div>
-                          <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{target.name}</h4>
-                          <p className="text-[11px] text-[#667085] font-medium">
-                            {formatMins(studied)} / {formatMins(planned)}
+                          <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc]">{course.name}</h4>
+                          <p className="text-[11px] text-[#64748b] font-medium">
+                            Daily Goal: {formatMins(course.daily_goal_minutes)}
                           </p>
                         </div>
                       </div>
-
-                      {isComplete ? (
-                        <span className="px-2 py-0.5 rounded-full bg-[#ecfdf3] text-[#027a48] border border-[#a6f4c5] text-[10px] font-bold flex items-center gap-1">
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>Done</span>
-                        </span>
-                      ) : (
-                        <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8]">{pct}%</span>
-                      )}
                     </div>
 
-                    <ProgressBar progress={pct} size="sm" color={isComplete ? 'bg-[#12b76a]' : 'bg-[#7f56d9]'} />
-
                     <Button
-                      variant={isComplete ? 'outline' : 'primary'}
+                      variant="outline"
                       size="sm"
-                      className="w-full font-bold text-xs"
+                      className="w-full font-bold text-xs bg-white dark:bg-[#181d2f] text-[#5b5bd6] dark:text-[#8282ea] border-[#e2e8f0] dark:border-[#2b334d] hover:bg-[#eef2f6]"
                       leftIcon={<Play className="w-3.5 h-3.5 fill-current" />}
-                      onClick={() => handleStartTargetFocus(target)}
+                      onClick={() => handleStartCourseFocus(course)}
                     >
-                      {studied > 0 ? 'Continue Focus' : 'Start Focus'}
+                      Start Focus
                     </Button>
                   </Card>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Practice & Question Bank Quick Panels */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] border-l-4 border-l-[#7f56d9] flex flex-col justify-between shadow-xs">
-              <div>
-                <div className="flex items-center gap-2 text-[#6941c6] dark:text-[#b692f6] font-bold text-sm mb-1">
-                  <BookOpen className="w-4 h-4" />
-                  <span>MCQ Practice & Tests</span>
-                </div>
-                <p className="text-xs text-[#475467] dark:text-[#9496a8] mb-3">
-                  Test your knowledge by topic, mix multiple topics, or run real timed exams with instant scoring.
-                </p>
+                ))}
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-xs font-bold bg-white dark:bg-[#1a1f30] text-[#344054] dark:text-[#eceef2] border-[#d0d5dd] dark:border-[#344054]"
-                leftIcon={<Play className="w-3.5 h-3.5 text-[#7f56d9]" />}
-                onClick={() => onNavigate('practice')}
-              >
-                Open Practice Room →
-              </Button>
-            </Card>
-
-            <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] border-l-4 border-l-[#0284c7] flex flex-col justify-between shadow-xs">
-              <div>
-                <div className="flex items-center gap-2 text-[#0284c7] dark:text-[#38bdf8] font-bold text-sm mb-1">
-                  <Upload className="w-4 h-4" />
-                  <span>Upload Question Papers</span>
-                </div>
-                <p className="text-xs text-[#475467] dark:text-[#9496a8] mb-3">
-                  Upload PDF question sheets to store them directly into your question bank and start testing immediately.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full text-xs font-bold bg-white dark:bg-[#1a1f30] text-[#344054] dark:text-[#eceef2] border-[#d0d5dd] dark:border-[#344054]"
-                leftIcon={<Upload className="w-3.5 h-3.5 text-[#0284c7]" />}
-                onClick={() => onNavigate('questions', { openUpload: true })}
-              >
-                Upload PDF →
-              </Button>
-            </Card>
+            ) : (
+              <Card className="p-6 text-center text-xs text-[#64748b] border-[#e2e8f0] dark:border-[#23293d]">
+                <p>No active courses configured yet.</p>
+                <button
+                  onClick={() => onNavigate('targets')}
+                  className="mt-2 text-[#5b5bd6] font-bold hover:underline inline-flex items-center gap-1"
+                >
+                  + Add Your First Course
+                </button>
+              </Card>
+            )}
           </div>
         </div>
 
-        {/* Right 1 Col: Upcoming Schedule & Weekly Progress */}
+        {/* Right 1 Col: Next Session & 7-Day Chart */}
         <div className="space-y-6">
-          {/* Upcoming Session */}
-          <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
+          {/* Next Scheduled Session */}
+          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-brand-600" />
+              <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc] flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#5b5bd6]" />
                 <span>Next Scheduled Session</span>
               </h3>
               <button
                 onClick={() => onNavigate('planner')}
-                className="text-xs text-brand-600 dark:text-brand-400 hover:underline"
+                className="text-xs text-[#5b5bd6] dark:text-[#8282ea] hover:underline font-semibold"
               >
                 Planner →
               </button>
             </div>
 
             {upcomingSchedules.length > 0 ? (
-              <div className="p-3.5 rounded-2xl bg-brand-50 dark:bg-brand-950/40 border border-brand-100 dark:border-brand-900 space-y-2">
+              <div className="p-3.5 rounded-xl bg-[#eef2f6] dark:bg-[#1f2538] border border-[#e2e8f0] dark:border-[#2b334d] space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-brand-900 dark:text-brand-200">
+                  <span className="text-xs font-bold text-[#172033] dark:text-[#f8f9fc]">
                     {upcomingSchedules[0].title}
                   </span>
-                  <Badge variant="brand" size="sm">{upcomingSchedules[0].startTime}</Badge>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#5b5bd6]/10 text-[#5b5bd6]">
+                    {format(new Date(upcomingSchedules[0].start_time), 'h:mm a')}
+                  </span>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Duration: {upcomingSchedules[0].durationMinutes} minutes • 15m reminder active
+                <p className="text-[11px] text-[#64748b]">
+                  Duration: {upcomingSchedules[0].duration_minutes}m • 15m reminder active
                 </p>
                 <Button
                   variant="primary"
                   size="sm"
-                  className="w-full mt-2"
+                  className="w-full mt-2 text-xs font-bold"
                   leftIcon={<Play className="w-3.5 h-3.5" />}
                   onClick={() => {
-                    startSession(upcomingSchedules[0].targetId);
+                    startSession(upcomingSchedules[0].course_id);
                     openTimerModal();
                   }}
                 >
@@ -446,11 +416,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 </Button>
               </div>
             ) : (
-              <div className="py-6 text-center text-xs text-slate-400">
-                <p>No remaining study sessions scheduled for today.</p>
+              <div className="py-6 text-center text-xs text-[#64748b]">
+                <p>Nothing else planned today.</p>
                 <button
                   onClick={() => onNavigate('planner')}
-                  className="mt-2 text-brand-600 dark:text-brand-400 font-semibold hover:underline"
+                  className="mt-2 text-[#5b5bd6] dark:text-[#8282ea] font-bold hover:underline"
                 >
                   + Add to Planner
                 </button>
@@ -458,43 +428,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
             )}
           </Card>
 
-          {/* Last 7 Days Study Graph */}
-          <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs">
+          {/* Last 7 Days Bar Chart */}
+          <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
             <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-emerald-500" />
-                <span>Last 7 Days Focus</span>
+              <h3 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc] flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-[#12b76a]" />
+                <span>Last 7 Days</span>
               </h3>
-              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                {formatMins(totalWeeklyFocusMinutes)} total
+              <span className="text-xs font-bold text-[#5b5bd6] dark:text-[#8282ea]">
+                Weekly total: {formatMins(totalWeeklyFocusMinutes)}
               </span>
             </div>
 
-            <div className="h-36 w-full pt-2">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={last7DaysChartData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
-                  <XAxis dataKey="day" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} unit="h" />
-                  <Tooltip
-                    cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }}
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-slate-900 text-white text-xs p-2 rounded-lg shadow-lg border border-slate-800">
-                            <p className="font-bold">{data.day} ({data.fullDate})</p>
-                            <p className="text-brand-300 mt-0.5">{formatMins(data.minutes)} focused</p>
-                            <p className="text-slate-400">{data.mcqs} MCQs attempted</p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    }}
-                  />
-                  <Bar dataKey="hours" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            {totalWeeklyFocusMinutes > 0 ? (
+              <div className="h-36 w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={last7DaysChartData} margin={{ top: 10, right: 0, left: -25, bottom: 0 }}>
+                    <XAxis dataKey="day" stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#94a3b8" fontSize={10} tickLine={false} axisLine={false} unit="h" />
+                    <Tooltip
+                      cursor={{ fill: 'rgba(91, 91, 214, 0.08)' }}
+                      content={({ active, payload }) => {
+                        if (active && payload && payload.length) {
+                          const data = payload[0].payload;
+                          return (
+                            <div className="bg-[#172033] text-white text-xs p-2 rounded-lg shadow-lg border border-slate-700">
+                              <p className="font-bold">{data.day} ({data.fullDate})</p>
+                              <p className="text-[#8282ea] mt-0.5">{formatMins(data.minutes)} focused</p>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    />
+                    <Bar dataKey="hours" fill="#5b5bd6" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-xs text-[#64748b]">
+                <p>Your study activity will appear here after your first Focus Session.</p>
+              </div>
+            )}
           </Card>
         </div>
       </div>
