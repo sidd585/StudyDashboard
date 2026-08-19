@@ -22,18 +22,27 @@ import {
   Eye,
   HeartHandshake,
   Trash2,
+  RefreshCw,
+  Plus,
 } from 'lucide-react';
 
 export const Admin: React.FC = () => {
   const { user } = useAuth();
   const { isMainAdmin, isSubAdmin, refreshFriendStatus } = useUser();
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'pending' | 'subadmins' | 'friend'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'pending' | 'subadmins' | 'friend'>('pending');
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
   const [stats, setStats] = useState<AdminOverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Admin Friend Selection State (Requirement 61)
+  // Quick Approve by Email state
+  const [emailToApprove, setEmailToApprove] = useState('');
+  const [displayNameToApprove, setDisplayNameToApprove] = useState('');
+  const [roleToApprove, setRoleToApprove] = useState<ApplicationRole>('USER');
+  const [isApprovingByEmail, setIsApprovingByEmail] = useState(false);
+  const [approvalMessage, setApprovalMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Admin Friend Selection State
   const [selectedFriendUserId, setSelectedFriendUserId] = useState<string>('');
   const [activeFriendName, setActiveFriendName] = useState<string | null>(null);
   const [friendSaveStatus, setFriendSaveStatus] = useState<string | null>(null);
@@ -53,7 +62,6 @@ export const Admin: React.FC = () => {
         adminService.getActiveAdminFriend(),
       ]);
 
-      // Scoped view for Sub-Admin
       if (isSubAdmin && user) {
         setUsers(userList.filter(u => u.managedBy === user.id && u.visibleToSubAdmin));
       } else {
@@ -81,6 +89,35 @@ export const Admin: React.FC = () => {
     const success = await adminService.approveUser(userId, role, isSubAdmin ? user?.id : undefined);
     if (success) {
       loadData();
+    }
+  };
+
+  const handleQuickApproveByEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailToApprove.trim()) return;
+
+    setIsApprovingByEmail(true);
+    setApprovalMessage(null);
+
+    try {
+      const res = await adminService.addOrApproveUserByEmail(
+        emailToApprove.trim(),
+        displayNameToApprove.trim() || undefined,
+        roleToApprove
+      );
+
+      if (res.success) {
+        setApprovalMessage({ text: res.message, isError: false });
+        setEmailToApprove('');
+        setDisplayNameToApprove('');
+        loadData();
+      } else {
+        setApprovalMessage({ text: res.message, isError: true });
+      }
+    } catch (err: any) {
+      setApprovalMessage({ text: err?.message || 'Failed to approve user', isError: true });
+    } finally {
+      setIsApprovingByEmail(false);
     }
   };
 
@@ -131,6 +168,7 @@ export const Admin: React.FC = () => {
         alert(`Successfully reset ${resetType === 'PROGRESS_ONLY' ? 'progress' : 'all study data'} for ${resetModalUser.displayName}.`);
         setResetModalUser(null);
         setResetConfirmText('');
+        loadData();
       } else {
         alert('Failed to reset user data.');
       }
@@ -146,7 +184,7 @@ export const Admin: React.FC = () => {
     return (
       <div className="p-8 max-w-lg mx-auto text-center space-y-3">
         <ShieldAlert className="w-12 h-12 text-amber-500 mx-auto" />
-        <h2 className="text-xl font-bold text-[#172033] dark:text-[#f8f9fc]">Access Restricted</h2>
+        <h2 className="text-xl font-bold text-[#101828] dark:text-[#f8f9fc]">Access Restricted</h2>
         <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
           This console is reserved for the Super Admin and authorized Sub-Admins.
         </p>
@@ -155,56 +193,48 @@ export const Admin: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#172033] dark:text-[#f8f9fc] transition-colors">
+    <div className="space-y-6 max-w-7xl mx-auto pb-16 animate-fade-in text-[#101828] dark:text-[#f8f9fc] transition-colors">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-extrabold text-[#172033] dark:text-[#f8f9fc] tracking-tight">
-              {isMainAdmin ? 'Super Admin Console' : 'Sub-Admin Workspace'}
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-extrabold text-[#101828] dark:text-[#f8f9fc] tracking-tight flex items-center gap-2">
+              <Users className="w-5 h-5 text-[#5b5bd6]" />
+              <span>Admin & Access Control</span>
             </h1>
-            <Badge variant={isMainAdmin ? 'brand' : 'neutral'} size="sm">
-              {isMainAdmin ? 'MAIN ADMIN' : 'SUB ADMIN'}
-            </Badge>
+            <Badge variant="brand">{isMainAdmin ? 'Super Admin' : 'Sub-Admin'}</Badge>
           </div>
           <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-0.5">
-            {isMainAdmin
-              ? 'User approvals, role assignments, Sub-Admin delegation, and Admin Friend management.'
-              : 'Manage assigned study users and approve pending registrations.'}
+            Approve user registrations, assign Sub-Admins, and manage Admin Friend connections.
           </p>
         </div>
+
+        <Button
+          variant="outline"
+          size="sm"
+          className="bg-white dark:bg-[#181d2f] text-xs font-bold border-[#e2e8f0] dark:border-[#2b334d] text-[#5b5bd6] self-start sm:self-auto"
+          leftIcon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
+          onClick={loadData}
+        >
+          Refresh Users
+        </Button>
       </div>
 
-      {/* Tabs */}
+      {friendSaveStatus && (
+        <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold animate-fade-in flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4" />
+          <span>{friendSaveStatus}</span>
+        </div>
+      )}
+
+      {/* Admin Tabs */}
       <div className="flex items-center gap-2 border-b border-[#e2e8f0] dark:border-[#23293d] pb-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
-            activeTab === 'overview'
-              ? 'bg-[#5b5bd6] text-white shadow-xs'
-              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
-          }`}
-        >
-          Overview
-        </button>
-
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
-            activeTab === 'users'
-              ? 'bg-[#5b5bd6] text-white shadow-xs'
-              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
-          }`}
-        >
-          All Users ({users.length})
-        </button>
-
         <button
           onClick={() => setActiveTab('pending')}
           className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
             activeTab === 'pending'
               ? 'bg-[#5b5bd6] text-white shadow-xs'
-              : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+              : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
           }`}
         >
           <span>Pending Approvals</span>
@@ -215,6 +245,28 @@ export const Admin: React.FC = () => {
           )}
         </button>
 
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
+            activeTab === 'users'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
+          }`}
+        >
+          All Users ({users.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
+            activeTab === 'overview'
+              ? 'bg-[#5b5bd6] text-white shadow-xs'
+              : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
+          }`}
+        >
+          System Overview
+        </button>
+
         {isMainAdmin && (
           <>
             <button
@@ -222,7 +274,7 @@ export const Admin: React.FC = () => {
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap ${
                 activeTab === 'subadmins'
                   ? 'bg-[#5b5bd6] text-white shadow-xs'
-                  : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+                  : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
               }`}
             >
               Sub-Admins ({subAdminList.length})
@@ -233,7 +285,7 @@ export const Admin: React.FC = () => {
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 activeTab === 'friend'
                   ? 'bg-[#12b76a] text-white shadow-xs'
-                  : 'text-[#64748b] hover:text-[#172033] dark:hover:text-white'
+                  : 'text-[#64748b] hover:text-[#101828] dark:hover:text-white'
               }`}
             >
               <HeartHandshake className="w-3.5 h-3.5" />
@@ -243,38 +295,140 @@ export const Admin: React.FC = () => {
         )}
       </div>
 
-      {/* TAB 1: OVERVIEW (Requirement 58) */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-              <span className="text-xs font-bold text-[#64748b] uppercase">Total Registered Users</span>
-              <p className="text-2xl font-extrabold text-[#172033] dark:text-white mt-1">{stats?.totalUsers || 0}</p>
-            </Card>
-
-            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-              <span className="text-xs font-bold text-[#64748b] uppercase">Active Users</span>
-              <p className="text-2xl font-extrabold text-[#12b76a] mt-1">{stats?.activeUsers || 0}</p>
-            </Card>
-
-            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-              <span className="text-xs font-bold text-[#64748b] uppercase">Pending Approval</span>
-              <p className="text-2xl font-extrabold text-amber-500 mt-1">{stats?.pendingApprovals || 0}</p>
-            </Card>
-
-            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs">
-              <span className="text-xs font-bold text-[#64748b] uppercase">Admin Friend Status</span>
-              <p className="text-sm font-extrabold text-[#5b5bd6] mt-2 truncate">
-                {stats?.activeAdminFriend ? `Connected (${stats.activeAdminFriend})` : 'Not Selected'}
-              </p>
-            </Card>
-          </div>
+      {/* QUICK APPROVE / ADD USER BY EMAIL CARD */}
+      <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-3">
+        <div className="flex items-center gap-2">
+          <UserPlus className="w-4 h-4 text-[#5b5bd6]" />
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#64748b] dark:text-[#9496a8]">
+            Instant User Approval by Email
+          </h2>
         </div>
+        <p className="text-xs text-[#64748b] dark:text-[#9496a8]">
+          Enter your friend's registered email to immediately approve and activate their account.
+        </p>
+
+        {approvalMessage && (
+          <div
+            className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+              approvalMessage.isError
+                ? 'bg-rose-500/10 border border-rose-500/30 text-rose-600'
+                : 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
+            }`}
+          >
+            {approvalMessage.isError ? <XCircle className="w-4 h-4 shrink-0" /> : <CheckCircle2 className="w-4 h-4 shrink-0" />}
+            <span>{approvalMessage.text}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleQuickApproveByEmail} className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end pt-1">
+          <div className="sm:col-span-5 space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Friend's Email *</label>
+            <input
+              type="email"
+              placeholder="e.g. ram.jha@gmail.com"
+              value={emailToApprove}
+              onChange={e => setEmailToApprove(e.target.value)}
+              required
+              className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="sm:col-span-3 space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Display Name (Optional)</label>
+            <input
+              type="text"
+              placeholder="e.g. Ram Jha"
+              value={displayNameToApprove}
+              onChange={e => setDisplayNameToApprove(e.target.value)}
+              className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="sm:col-span-2 space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Role</label>
+            <select
+              value={roleToApprove}
+              onChange={e => setRoleToApprove(e.target.value as ApplicationRole)}
+              className="w-full px-3 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] font-semibold text-[#101828] dark:text-[#f8f9fc] outline-none"
+            >
+              <option value="USER">USER</option>
+              <option value="FRIEND">FRIEND</option>
+              <option value="SUB_ADMIN">SUB_ADMIN</option>
+            </select>
+          </div>
+
+          <div className="sm:col-span-2">
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              disabled={isApprovingByEmail || !emailToApprove.trim()}
+              className="w-full font-bold bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white text-xs"
+            >
+              {isApprovingByEmail ? 'Activating...' : 'Approve User'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      {/* TAB 1: PENDING APPROVALS */}
+      {activeTab === 'pending' && (
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Pending User Registrations</h2>
+            <span className="text-xs text-[#64748b]">{pendingUsers.length} waiting</span>
+          </div>
+
+          {pendingUsers.length > 0 ? (
+            <div className="space-y-3">
+              {pendingUsers.map(u => (
+                <div
+                  key={u.id}
+                  className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-[#f8fafc] dark:bg-[#181d2f] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div>
+                    <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{u.displayName}</h4>
+                    <p className="text-xs text-[#64748b]">{u.email}</p>
+                    <span className="text-[10px] text-amber-600 font-semibold">Registered & waiting for approval</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                      onClick={() => handleApproveUser(u.id, 'USER')}
+                    >
+                      Approve as USER
+                    </Button>
+                    {isMainAdmin && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-white dark:bg-[#141824] text-[#5b5bd6] border-[#e2e8f0] dark:border-[#2b334d] font-bold text-xs"
+                        onClick={() => handleApproveUser(u.id, 'SUB_ADMIN')}
+                      >
+                        Approve as SUB ADMIN
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-xs text-[#64748b] space-y-2">
+              <p>No new registrations currently waiting in queue.</p>
+              <p className="text-[11px] text-[#94a3b8]">
+                If a friend registered and hasn't appeared yet, enter their email in the <strong>Instant User Approval</strong> box above!
+              </p>
+            </div>
+          )}
+        </Card>
       )}
 
-      {/* TAB 2: USERS TABLE (Requirement 59, 60) */}
+      {/* TAB 2: ALL USERS TABLE */}
       {activeTab === 'users' && (
-        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
               <thead>
@@ -290,7 +444,7 @@ export const Admin: React.FC = () => {
                 {users.map(u => (
                   <tr key={u.id} className="hover:bg-[#f8fafc] dark:hover:bg-[#181d2f]/60 transition-colors">
                     <td className="py-3">
-                      <p className="font-bold text-[#172033] dark:text-[#f8f9fc]">{u.displayName}</p>
+                      <p className="font-bold text-[#101828] dark:text-[#f8f9fc]">{u.displayName}</p>
                       <p className="text-[11px] text-[#64748b]">{u.email}</p>
                     </td>
                     <td className="py-3">
@@ -350,7 +504,7 @@ export const Admin: React.FC = () => {
                           <>
                             <button
                               onClick={() => handleToggleStatus(u.id, u.status)}
-                              className="text-xs font-semibold text-[#64748b] hover:text-[#172033] p-1"
+                              className="text-xs font-semibold text-[#64748b] hover:text-[#101828] p-1"
                             >
                               {u.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
                             </button>
@@ -375,58 +529,39 @@ export const Admin: React.FC = () => {
         </Card>
       )}
 
-      {/* TAB 3: PENDING APPROVALS */}
-      {activeTab === 'pending' && (
-        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Pending User Registrations</h2>
-          {pendingUsers.length > 0 ? (
-            <div className="space-y-3">
-              {pendingUsers.map(u => (
-                <div
-                  key={u.id}
-                  className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#181d2f] flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                >
-                  <div>
-                    <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc]">{u.displayName}</h4>
-                    <p className="text-xs text-[#64748b]">{u.email}</p>
-                    <span className="text-[10px] text-amber-600 font-semibold">Registered & waiting for approval</span>
-                  </div>
+      {/* TAB 3: OVERVIEW */}
+      {activeTab === 'overview' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Total Registered Users</span>
+              <p className="text-2xl font-extrabold text-[#101828] dark:text-white mt-1">{stats?.totalUsers || 0}</p>
+            </Card>
 
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      className="bg-emerald-600 text-white font-bold"
-                      onClick={() => handleApproveUser(u.id, 'USER')}
-                    >
-                      Approve as USER
-                    </Button>
-                    {isMainAdmin && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="bg-white dark:bg-[#181d2f] text-[#5b5bd6] font-bold"
-                        onClick={() => handleApproveUser(u.id, 'SUB_ADMIN')}
-                      >
-                        Approve as SUB ADMIN
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="py-8 text-center text-xs text-[#64748b]">
-              No registrations waiting for approval.
-            </div>
-          )}
-        </Card>
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Active Users</span>
+              <p className="text-2xl font-extrabold text-[#12b76a] mt-1">{stats?.activeUsers || 0}</p>
+            </Card>
+
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Pending Approval</span>
+              <p className="text-2xl font-extrabold text-amber-500 mt-1">{stats?.pendingApprovals || 0}</p>
+            </Card>
+
+            <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs">
+              <span className="text-xs font-bold text-[#64748b] uppercase">Admin Friend Status</span>
+              <p className="text-sm font-extrabold text-[#5b5bd6] mt-2 truncate">
+                {stats?.activeAdminFriend ? `Connected (${stats.activeAdminFriend})` : 'Not Selected'}
+              </p>
+            </Card>
+          </div>
+        </div>
       )}
 
-      {/* TAB 4: SUB ADMINS (Requirement 62) */}
+      {/* TAB 4: SUB ADMINS */}
       {activeTab === 'subadmins' && isMainAdmin && (
-        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-4">
-          <h2 className="text-sm font-bold text-[#172033] dark:text-[#f8f9fc]">Sub-Admin Workspaces</h2>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+          <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Sub-Admin Workspaces</h2>
           <p className="text-xs text-[#64748b]">
             Sub-Admins can manage subordinate users assigned under them, but cannot see Super Admin, Admin Friend, or Main-Admin-Only users.
           </p>
@@ -435,9 +570,9 @@ export const Admin: React.FC = () => {
             {subAdminList.map(sa => {
               const subordinates = users.filter(u => u.managedBy === sa.id);
               return (
-                <div key={sa.id} className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#181d2f] space-y-2">
+                <div key={sa.id} className="p-4 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] bg-[#f8fafc] dark:bg-[#181d2f] space-y-2">
                   <div className="flex items-center justify-between">
-                    <h4 className="font-bold text-sm text-[#172033] dark:text-[#f8f9fc]">{sa.displayName}</h4>
+                    <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{sa.displayName}</h4>
                     <Badge variant="brand">Sub-Admin</Badge>
                   </div>
                   <p className="text-xs text-[#64748b]">{sa.email}</p>
@@ -451,61 +586,46 @@ export const Admin: React.FC = () => {
         </Card>
       )}
 
-      {/* TAB 5: ADMIN FRIEND SELECTION (Requirement 61) */}
+      {/* TAB 5: ADMIN FRIEND */}
       {activeTab === 'friend' && isMainAdmin && (
-        <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-[#fbfcfe] dark:bg-[#141824] shadow-xs space-y-5 max-w-2xl">
-          <div>
-            <h2 className="text-base font-extrabold text-[#172033] dark:text-[#f8f9fc] flex items-center gap-2">
-              <HeartHandshake className="w-5 h-5 text-emerald-600" />
-              <span>Admin Friend Selection</span>
-            </h2>
-            <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-1">
-              Select one active friend. When saved, the Super Admin and Admin Friend will share the private <strong>Study Together</strong> comparison room.
-            </p>
+        <Card className="p-5 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4">
+          <div className="flex items-center gap-2">
+            <HeartHandshake className="w-5 h-5 text-[#12b76a]" />
+            <h2 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Admin Friend Link</h2>
           </div>
+          <p className="text-xs text-[#64748b]">
+            Designating an active user as your Admin Friend allows you to share subjective question papers and study together in real-time.
+          </p>
 
-          {friendSaveStatus && (
-            <div className="p-3.5 bg-emerald-500/10 rounded-xl border border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-xs font-bold">
-              ✓ {friendSaveStatus}
+          <div className="space-y-3 pt-2 max-w-md">
+            <div className="space-y-1">
+              <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">Select Friend User</label>
+              <select
+                value={selectedFriendUserId}
+                onChange={e => setSelectedFriendUserId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] font-semibold text-[#101828] dark:text-[#f8f9fc] outline-none"
+              >
+                <option value="">-- Choose User --</option>
+                {users.filter(u => u.role !== 'MAIN_ADMIN').map(u => (
+                  <option key={u.id} value={u.id}>{u.displayName} ({u.email})</option>
+                ))}
+              </select>
             </div>
-          )}
 
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-              Select Admin Friend:
-            </label>
-            <select
-              value={selectedFriendUserId}
-              onChange={e => setSelectedFriendUserId(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] font-bold text-[#172033] dark:text-[#f8f9fc] outline-none"
-            >
-              <option value="">-- Choose User as Admin Friend --</option>
-              {users.filter(u => u.role !== 'MAIN_ADMIN').map(u => (
-                <option key={u.id} value={u.id}>
-                  {u.displayName} ({u.email})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="pt-2 flex items-center justify-between">
-            <span className="text-xs text-[#64748b]">
-              Current Friend: <strong className="text-[#172033] dark:text-white">{activeFriendName || 'None'}</strong>
-            </span>
             <Button
               variant="primary"
-              size="md"
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-              onClick={handleSaveAdminFriend}
+              size="sm"
               disabled={!selectedFriendUserId}
+              onClick={handleSaveAdminFriend}
+              className="bg-[#12b76a] hover:bg-[#0e9f5d] text-white font-bold"
             >
-              Save Admin Friend
+              Set as Admin Friend
             </Button>
           </div>
         </Card>
       )}
 
-      {/* ================= MODAL: ADMIN RESET USER DATA (Requirement 56) ================= */}
+      {/* Reset Modal */}
       {resetModalUser && (
         <Modal
           isOpen={true}
@@ -513,16 +633,16 @@ export const Admin: React.FC = () => {
           title={`Reset Data: ${resetModalUser.displayName}`}
           size="md"
         >
-          <div className="space-y-4 text-[#172033] dark:text-[#f8f9fc]">
-            <div className="p-3.5 bg-rose-500/10 rounded-xl border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs space-y-1">
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-400 rounded-xl space-y-1">
               <p className="font-bold">Caution: This action cannot be undone.</p>
               <p>Choose whether to reset only study progress/attempts or wipe all study data (courses, questions, planner).</p>
             </div>
 
             <div className="space-y-2">
-              <label className="block text-xs font-bold">Reset Type:</label>
-              <div className="space-y-2 text-xs">
-                <label className="flex items-center gap-2 p-2.5 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d] cursor-pointer">
+              <label className="block font-bold">Reset Type:</label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 p-3 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] cursor-pointer">
                   <input
                     type="radio"
                     name="resetType"
@@ -531,8 +651,7 @@ export const Admin: React.FC = () => {
                   />
                   <span><strong>Reset Progress Only</strong> (clears study time, attempts, scores; keeps courses & questions)</span>
                 </label>
-
-                <label className="flex items-center gap-2 p-2.5 rounded-xl border border-[#e2e8f0] dark:border-[#2b334d] cursor-pointer">
+                <label className="flex items-center gap-2 p-3 rounded-xl border border-[#e2e8f0] dark:border-[#23293d] cursor-pointer">
                   <input
                     type="radio"
                     name="resetType"
@@ -545,15 +664,13 @@ export const Admin: React.FC = () => {
             </div>
 
             <div className="space-y-1">
-              <label className="block text-xs font-bold">
-                Type <code>RESET</code> to confirm:
-              </label>
+              <label className="block font-bold">Type RESET to confirm:</label>
               <input
                 type="text"
                 value={resetConfirmText}
                 onChange={e => setResetConfirmText(e.target.value)}
                 placeholder="RESET"
-                className="w-full px-3 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-rose-400 font-bold outline-none"
+                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] outline-none font-bold"
               />
             </div>
 
@@ -562,9 +679,9 @@ export const Admin: React.FC = () => {
               <Button
                 variant="primary"
                 size="sm"
-                className="bg-rose-600 hover:bg-rose-500 text-white font-bold"
-                onClick={handleExecuteReset}
                 disabled={resetConfirmText !== 'RESET' || isResetting}
+                onClick={handleExecuteReset}
+                className="bg-rose-600 text-white font-bold"
               >
                 {isResetting ? 'Resetting...' : 'Confirm Reset'}
               </Button>

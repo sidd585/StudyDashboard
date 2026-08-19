@@ -85,6 +85,69 @@ export const adminService = {
     return !error;
   },
 
+  // Add / Approve a registered user directly by Email
+  async addOrApproveUserByEmail(
+    email: string,
+    displayName?: string,
+    assignedRole: ApplicationRole = 'USER'
+  ): Promise<{ success: boolean; message: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { success: false, message: 'Please enter a valid email address.' };
+    }
+
+    // 1. Check if profile already exists in public.profiles
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id, email, status, role')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingProfile) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          status: 'ACTIVE',
+          role: assignedRole,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingProfile.id);
+
+      if (!error) {
+        return { success: true, message: `User ${cleanEmail} approved and activated as ${assignedRole}!` };
+      }
+      return { success: false, message: `Failed to update profile: ${error.message}` };
+    }
+
+    // 2. If profile row doesn't exist yet, insert active profile
+    const name = displayName?.trim() || cleanEmail.split('@')[0];
+    const formattedName = name.charAt(0).toUpperCase() + name.slice(1);
+
+    const { data: newProfile, error: insertError } = await supabase
+      .from('profiles')
+      .insert({
+        email: cleanEmail,
+        display_name: formattedName,
+        role: assignedRole,
+        status: 'ACTIVE',
+        visible_to_sub_admin: true,
+        daily_goal_minutes: 120,
+        timezone: 'Asia/Kathmandu',
+        avatar_url: cleanEmail.includes('shilpa') ? '/avatars/whale.png' : '/avatars/panda.png',
+      })
+      .select()
+      .single();
+
+    if (!insertError || newProfile) {
+      return { success: true, message: `Created and approved profile for ${cleanEmail}!` };
+    }
+
+    return {
+      success: false,
+      message: `Error activating profile for ${cleanEmail}: ${insertError?.message || 'Database error'}`,
+    };
+  },
+
   // Toggle user status (Active / Deactivated)
   async toggleUserStatus(userId: string, newStatus: AccountStatus): Promise<boolean> {
     const { error } = await supabase
