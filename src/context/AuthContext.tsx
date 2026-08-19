@@ -70,7 +70,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
 
         try {
-          const { data: savedProfile } = await supabase
+          const { data: savedProfile, error: upsertErr } = await supabase
             .from('profiles')
             .upsert(initialProfile, { onConflict: 'id' })
             .select('*')
@@ -79,9 +79,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (savedProfile) {
             setProfile(savedProfile as Profile);
           } else {
+            if (upsertErr) {
+              console.warn('Upsert failed, trying direct insert:', upsertErr.message);
+              const { data: inserted } = await supabase
+                .from('profiles')
+                .insert(initialProfile)
+                .select('*')
+                .single();
+              if (inserted) {
+                setProfile(inserted as Profile);
+                return;
+              }
+            }
             setProfile(initialProfile);
           }
-        } catch {
+        } catch (e) {
+          console.error('Exception during initial profile creation:', e);
           setProfile(initialProfile);
         }
       }
