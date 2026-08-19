@@ -337,7 +337,11 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
       }));
 
       // Directly batch save valid questions to Supabase
-      let batchResult = { inserted: 0, errors: 0 };
+      let batchResult: { inserted: number; errors: number; lastError?: string | null } = {
+        inserted: 0,
+        errors: 0,
+        lastError: null,
+      };
       if (inputs.length > 0) {
         batchResult = await questionService.createQuestionsBatch(inputs);
       }
