@@ -357,7 +357,7 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
         );
         setTimeout(() => setUploadSuccessMessage(null), 6000);
       } else if (validCandidates.length > 0 && batchResult.errors > 0) {
-        alert('Could not save questions to Supabase. Please ensure your database table permissions are open.');
+        alert(`Could not save questions to Supabase: ${batchResult.lastError || 'Database error'}`);
       }
 
       if (uncertainCandidates.length > 0) {

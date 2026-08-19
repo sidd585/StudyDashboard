@@ -116,9 +116,11 @@ export const questionService = {
   },
 
   // Batch insert with duplicate safety and automatic fallback
-  async createQuestionsBatch(inputs: QuestionInsertInput[]): Promise<{ inserted: number; errors: number }> {
+  async createQuestionsBatch(
+    inputs: QuestionInsertInput[]
+  ): Promise<{ inserted: number; errors: number; lastError: string | null }> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || inputs.length === 0) return { inserted: 0, errors: 0 };
+    if (!user || inputs.length === 0) return { inserted: 0, errors: 0, lastError: 'No authenticated user found' };
 
     const rows = inputs.map(input => ({
       user_id: user.id,
@@ -137,6 +139,7 @@ export const questionService = {
 
     let totalInserted = 0;
     let totalErrors = 0;
+    let lastError: string | null = null;
     const chunkSize = 25;
 
     for (let i = 0; i < rows.length; i += chunkSize) {
@@ -147,8 +150,10 @@ export const questionService = {
         .select('id');
 
       if (error) {
-        console.warn('Batch chunk insert failed, falling back to individual inserts:', error.message);
-        // Fallback: insert one-by-one so good questions still get saved
+        lastError = error.message;
+        console.warn('Batch chunk insert failed, falling back to adaptive inserts:', error.message);
+        
+        // Fallback: insert one-by-one with adaptive schema fallback
         for (const row of chunk) {
           const { data: singleData, error: singleErr } = await supabase
             .from('questions')
@@ -159,8 +164,32 @@ export const questionService = {
           if (!singleErr && singleData) {
             totalInserted++;
           } else {
-            console.error('Individual question insert error:', singleErr?.message);
-            totalErrors++;
+            // Adaptive minimal insert (removes subject_id / year if columns are missing)
+            const minimalRow: any = {
+              user_id: row.user_id,
+              course_id: row.course_id,
+              topic_id: row.topic_id || null,
+              question_text: row.question_text,
+              option_a: row.option_a,
+              option_b: row.option_b,
+              option_c: row.option_c,
+              option_d: row.option_d,
+              correct_answer: row.correct_answer,
+            };
+
+            const { data: minData, error: minErr } = await supabase
+              .from('questions')
+              .insert(minimalRow)
+              .select('id')
+              .single();
+
+            if (!minErr && minData) {
+              totalInserted++;
+            } else {
+              lastError = minErr?.message || singleErr?.message || 'Insert error';
+              console.error('Individual question insert error:', lastError);
+              totalErrors++;
+            }
           }
         }
       } else {
@@ -168,7 +197,7 @@ export const questionService = {
       }
     }
 
-    return { inserted: totalInserted, errors: totalErrors };
+    return { inserted: totalInserted, errors: totalErrors, lastError };
   },
 
   // Delete a question
