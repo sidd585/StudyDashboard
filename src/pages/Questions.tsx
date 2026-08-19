@@ -21,6 +21,7 @@ import {
   Check,
 } from 'lucide-react';
 import { importMCQsFromPDF, importMCQsFromText } from '../services/import';
+import { questionService } from '../services/questionService';
 import type { ParsedMCQCandidate, ImportDiagnostics } from '../services/import/types';
 import type { Question, Difficulty, QuestionOrigin } from '../types';
 import type { PageId } from '../components/layout/Sidebar';
@@ -228,6 +229,33 @@ export const Questions: React.FC<QuestionsProps> = ({ onNavigate }) => {
 
     if (questionsToInsert.length > 0) {
       await db.questions.bulkPut(questionsToInsert);
+
+      // Also persist directly to Supabase Cloud Question Bank
+      try {
+        const cloudQuestions = validOnes.map(q => {
+          const optA = q.options[0]?.text || 'Option A';
+          const optB = q.options[1]?.text || 'Option B';
+          const optC = q.options[2]?.text || 'Option C';
+          const optD = q.options[3]?.text || 'Option D';
+          return {
+            courseId: targetId,
+            topicId: topicId || null,
+            questionText: q.questionText,
+            optionA: optA,
+            optionB: optB,
+            optionC: optC,
+            optionD: optD,
+            correctAnswer: q.detectedAnswer || 'A',
+            explanation: q.explanation ? q.explanation.trim() : null,
+            sourceFileId: sourceName,
+            originalQuestionNumber: q.originalQuestionNumber || undefined,
+            answerStatus: 'VALID' as const,
+          };
+        });
+        await questionService.createQuestionsBatch(cloudQuestions);
+      } catch (cloudErr) {
+        console.warn('Cloud batch save note:', cloudErr);
+      }
     }
 
     const answersMappedCount = validOnes.filter(q => q.detectedAnswer).length;
