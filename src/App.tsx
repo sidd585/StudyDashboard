@@ -76,7 +76,7 @@ export const App: React.FC = () => {
           />
         );
       case 'questions':
-        return <Questions />;
+        return <Questions onNavigate={handleNavigate} />;
       case 'planner':
         return <Planner />;
       case 'together':

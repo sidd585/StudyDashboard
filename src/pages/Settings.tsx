@@ -14,15 +14,11 @@ import {
   Moon,
   Clock,
   Mail,
-  Sparkles,
-  ShieldCheck,
   Database,
   RotateCcw,
   Download,
   Sliders,
   CheckCircle2,
-  AlertTriangle,
-  Globe,
 } from 'lucide-react';
 import { sendDailySummaryEmail } from '../services/emailService';
 import { exportBackupData } from '../services/backupService';
@@ -33,8 +29,6 @@ type SettingsTab =
   | 'appearance'
   | 'preferences'
   | 'email'
-  | 'ai'
-  | 'sources'
   | 'data';
 
 export const SettingsContent: React.FC = () => {
@@ -51,11 +45,6 @@ export const SettingsContent: React.FC = () => {
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
     return typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
   });
-
-  // AI settings
-  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'builtin'>('builtin');
-  const [aiTemperature, setAiTemperature] = useState<number>(0.3);
-  const [researchTierPref, setResearchTierPref] = useState<'official_only' | 'official_and_trusted'>('official_and_trusted');
 
   // Status banners
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
@@ -160,17 +149,15 @@ export const SettingsContent: React.FC = () => {
     { id: 'appearance', label: 'Appearance', icon: Sun },
     { id: 'preferences', label: 'Study Preferences', icon: Sliders },
     { id: 'email', label: 'Email & Reminders', icon: Mail },
-    { id: 'ai', label: 'AI Settings', icon: Sparkles },
-    { id: 'sources', label: 'Trusted Sources', icon: ShieldCheck },
     { id: 'data', label: 'Data & Progress', icon: Database },
   ];
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-16 animate-fade-in">
+    <div className="max-w-4xl mx-auto space-y-6 pb-16 animate-fade-in">
       <div>
         <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Settings & Preferences</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-          Configure profile, email reminders, AI models, and trusted sources for Asia/Kathmandu timezone.
+          Configure profile, email reminders, timer defaults, and backup data.
         </p>
       </div>
 
@@ -217,7 +204,7 @@ export const SettingsContent: React.FC = () => {
               <h4 className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</h4>
               <p className="text-xs text-slate-500">{currentUser.email}</p>
               <Badge variant="brand" className="mt-1.5">
-                Profile: {activeProfileKey === 'siddhartha' ? 'Siddhartha (RBB/NRB)' : 'Shilpa (Medical/General)'}
+                Profile: {activeProfileKey === 'siddhartha' ? 'Siddhartha (RBB IT Level 5)' : 'Shilpa (Sangathit Sanstha)'}
               </Badge>
             </div>
           </div>
@@ -379,96 +366,7 @@ export const SettingsContent: React.FC = () => {
         </Card>
       )}
 
-      {/* ================= TAB 5: AI SETTINGS ================= */}
-      {activeTab === 'ai' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-amber-500" />
-            <span>AI Model & Generation Configuration</span>
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                AI Provider Engine
-              </label>
-              <select
-                value={aiProvider}
-                onChange={e => setAiProvider(e.target.value as any)}
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value="builtin">Curriculum Grounded Engine (Standard / Secure)</option>
-                <option value="gemini">Google Gemini AI Model (Server Configured)</option>
-                <option value="openai">OpenAI ChatGPT Model (Server Configured)</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Default Research Tier
-              </label>
-              <select
-                value={researchTierPref}
-                onChange={e => setResearchTierPref(e.target.value as any)}
-                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
-              >
-                <option value="official_and_trusted">Official + Trusted Secondary Sources</option>
-                <option value="official_only">Official Sources Only (Tier 1 Strict)</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
-            <strong>Security Notice:</strong> All AI calls and API credentials are kept strictly server-side in your environment configuration and are never exposed in browser clients.
-          </div>
-
-          <div className="pt-2">
-            <Button variant="primary" size="sm" onClick={handleSavePreferences}>
-              Save AI Settings
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* ================= TAB 6: TRUSTED SOURCES ================= */}
-      {activeTab === 'sources' && (
-        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Trusted Research Hierarchy & Whitelisted Domains</span>
-          </h3>
-
-          <div className="space-y-3 pt-1">
-            <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-1">
-              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase">Tier 1 — Official Nepal Government / Institutional</span>
-              <p className="text-xs text-slate-700 dark:text-slate-300">
-                • <code>psc.gov.np</code> (Public Service Commission Examination Directives)<br />
-                • <code>nrb.org.np</code> (Nepal Rastra Bank Acts & Circulars)<br />
-                • <code>rbb.com.np</code> (Rastriya Banijya Bank Recruitment Standards)<br />
-                • <code>lawcommission.gov.np</code> (Nepal Law Commission Statutes)
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-1">
-              <span className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase">Tier 2 — User Verified Documents</span>
-              <p className="text-xs text-slate-700 dark:text-slate-300">
-                • Uploaded syllabus PDFs<br />
-                • Uploaded old question papers<br />
-                • Verified Question Bank records
-              </p>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-1">
-              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase">Tier 3 — Trusted Secondary</span>
-              <p className="text-xs text-slate-700 dark:text-slate-300">
-                • Peer-reviewed reference textbooks and standard curriculum used only when Tier 1 evidence is insufficient.
-              </p>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* ================= TAB 7: DATA & PROGRESS ================= */}
+      {/* ================= TAB 5: DATA & PROGRESS ================= */}
       {activeTab === 'data' && (
         <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">

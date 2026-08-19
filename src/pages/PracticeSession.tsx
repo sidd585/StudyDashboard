@@ -12,7 +12,6 @@ import {
   ChevronRight,
   ChevronLeft,
   RotateCcw,
-  Sparkles,
   HelpCircle,
   Check,
   X,
@@ -22,8 +21,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { AIStudyBuilderModal } from '../components/ai/AIStudyBuilderModal';
-import type { Question, QuizSession } from '../types';
+import type { Question, QuizSession, QuizConfig } from '../types';
 
 interface PracticeSessionProps {
   sessionId: string;
@@ -38,21 +36,20 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState<boolean>(false);
-  const [sessionStartTime] = useState<number>(Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
   const [isCompleted, setIsCompleted] = useState<boolean>(false);
-  const [isAIModalOpen, setIsAIModalOpen] = useState<boolean>(false);
 
   // Results State
   const [resultsData, setResultsData] = useState<{
     total: number;
     correct: number;
     wrong: number;
+    unanswered: number;
     accuracy: number;
+    score: number;
     timeSpentFormatted: string;
-    avgTimePerQuestion: string;
     topicBreakdown: Record<string, { total: number; correct: number; pct: number }>;
     wrongQuestionIds: string[];
-    topWeakTopic?: string;
   } | null>(null);
 
   const questionIds = session?.questionIds || [];
@@ -62,6 +59,29 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
     () => (currentQuestionId ? db.questions.get(currentQuestionId) : undefined),
     [currentQuestionId]
   );
+
+  const isExamMode = session?.config?.mode === 'exam';
+  const durationMinutes = session?.config?.durationMinutes || 45;
+  const totalExamSeconds = durationMinutes * 60;
+  const remainingSeconds = Math.max(0, totalExamSeconds - elapsedSeconds);
+
+  // Timer Tick
+  useEffect(() => {
+    if (isCompleted) return;
+
+    const timer = setInterval(() => {
+      setElapsedSeconds(prev => {
+        const next = prev + 1;
+        if (isExamMode && next >= totalExamSeconds) {
+          clearInterval(timer);
+          finishPractice();
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isCompleted, isExamMode, totalExamSeconds]);
 
   // Sync state on question change
   useEffect(() => {
@@ -94,14 +114,19 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
 
   // Handle Option Select
   const handleSelectOption = async (optionId: string) => {
-    if (isAnswered || !currentQuestion || !session) return;
+    if (!currentQuestion || !session) return;
+    if (isExamMode && isAnswered) {
+      // Allow changing answer in exam mode before final submit
+    } else if (isAnswered) {
+      return;
+    }
 
     setSelectedOption(optionId);
     setIsAnswered(true);
 
     const isCorrect = optionId === currentQuestion.correctOptionId;
 
-    if (isCorrect) {
+    if (isCorrect && !isExamMode) {
       confetti({ particleCount: 30, spread: 60, origin: { y: 0.8 } });
     }
 
@@ -119,7 +144,7 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
       isCorrect,
       isSkipped: false,
       responseTimeMs: 5000,
-      mode: 'practice',
+      mode: isExamMode ? 'exam' : 'practice',
       timestamp: Date.now(),
     });
 
@@ -163,373 +188,350 @@ export const PracticeSession: React.FC<PracticeSessionProps> = ({ sessionId, onF
     }
   };
 
+  // Finalize practice & compute results
   const finishPractice = async () => {
     if (!session) return;
 
-    const allQuestions = await db.questions.where('id').anyOf(session.questionIds).toArray();
-    let correct = 0;
-    let wrong = 0;
+    const allQuestions = await db.questions.where('id').anyOf(questionIds).toArray();
+    const topicsList = await db.topics.toArray();
+
+    let correctCount = 0;
+    let wrongCount = 0;
+    let unansweredCount = 0;
     const wrongIds: string[] = [];
-    const topicStats: Record<string, { total: number; correct: number; pct: number }> = {};
+    const topicBreakdown: Record<string, { total: number; correct: number; pct: number }> = {};
 
     allQuestions.forEach(q => {
-      const topicKey = q.tags?.[0] || 'General Subject';
-      if (!topicStats[topicKey]) {
-        topicStats[topicKey] = { total: 0, correct: 0, pct: 0 };
+      const topicName = topicsList.find(t => t.id === q.topicId)?.name || 'General';
+      if (!topicBreakdown[topicName]) {
+        topicBreakdown[topicName] = { total: 0, correct: 0, pct: 0 };
       }
-      topicStats[topicKey].total += 1;
+      topicBreakdown[topicName].total += 1;
 
       const ans = session.answers[q.id];
-      if (ans && ans.selectedOptionId) {
-        if (ans.selectedOptionId === q.correctOptionId) {
-          correct++;
-          topicStats[topicKey].correct += 1;
-        } else {
-          wrong++;
-          wrongIds.push(q.id);
-        }
+      if (!ans || !ans.selectedOptionId) {
+        unansweredCount += 1;
+      } else if (ans.selectedOptionId === q.correctOptionId) {
+        correctCount += 1;
+        topicBreakdown[topicName].correct += 1;
+      } else {
+        wrongCount += 1;
+        wrongIds.push(q.id);
       }
     });
 
-    // Calculate percentage per topic
-    Object.keys(topicStats).forEach(key => {
-      const item = topicStats[key];
-      item.pct = item.total > 0 ? Math.round((item.correct / item.total) * 100) : 0;
+    Object.keys(topicBreakdown).forEach(k => {
+      const t = topicBreakdown[k];
+      t.pct = t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0;
     });
 
-    // Determine top weak topic
-    let topWeakTopic: string | undefined = undefined;
-    let lowestPct = 100;
-    Object.entries(topicStats).forEach(([top, st]) => {
-      if (st.total >= 1 && st.pct < lowestPct) {
-        lowestPct = st.pct;
-        topWeakTopic = top;
-      }
-    });
+    const total = questionIds.length;
+    const accuracy = (correctCount + wrongCount) > 0 ? Math.round((correctCount / (correctCount + wrongCount)) * 100) : 0;
+    const score = (correctCount * 2) - (wrongCount * 0.4);
 
-    const accuracy = correct + wrong > 0 ? Math.round((correct / (correct + wrong)) * 100) : 0;
-    const totalTimeMs = Date.now() - sessionStartTime;
-    const focusedMinutes = Math.max(1, Math.round(totalTimeMs / 60000));
-    const avgSecsPerQ = questionIds.length > 0 ? Math.round(totalTimeMs / (questionIds.length * 1000)) : 0;
-
-    // Log automatic study session for the target
-    if (session.targetId) {
-      await db.studySessions.put({
-        id: `sess-mcq-${Date.now()}`,
-        userId: currentUser.id,
-        targetId: session.targetId,
-        activityType: 'MCQ Practice',
-        startTime: sessionStartTime,
-        endTime: Date.now(),
-        focusedMinutes,
-        breakMinutes: 0,
-        focusRating: accuracy >= 75 ? 5 : 4,
-        notes: `Practiced ${questionIds.length} MCQs (${accuracy}% accuracy).`,
-        createdAt: Date.now(),
-      });
-    }
+    const m = Math.floor(elapsedSeconds / 60);
+    const s = elapsedSeconds % 60;
+    const timeFormatted = `${m}m ${s < 10 ? '0' : ''}${s}s`;
 
     await db.quizSessions.update(session.id, {
       status: 'completed',
       completedAt: Date.now(),
-      totalTimeSpentMs: totalTimeMs,
-      score: correct,
-      accuracy,
-      netScore: correct,
+      totalTimeSpentMs: elapsedSeconds * 1000,
     });
 
     setResultsData({
-      total: questionIds.length,
-      correct,
-      wrong,
+      total,
+      correct: correctCount,
+      wrong: wrongCount,
+      unanswered: unansweredCount,
       accuracy,
-      timeSpentFormatted: `${Math.floor(focusedMinutes)}m`,
-      avgTimePerQuestion: `${avgSecsPerQ}s`,
-      topicBreakdown: topicStats,
+      score: Math.max(0, Number(score.toFixed(1))),
+      timeSpentFormatted: timeFormatted,
+      topicBreakdown,
       wrongQuestionIds: wrongIds,
-      topWeakTopic,
     });
 
     setIsCompleted(true);
   };
 
-  // 1. Completion / Results View with Topic Accuracy Breakdown
+  // Launch wrong questions practice session
+  const handlePracticeWrongQuestions = async () => {
+    if (!resultsData || resultsData.wrongQuestionIds.length === 0) return;
+
+    const newSessionId = `session-wrong-${Date.now()}`;
+    const newConfig: QuizConfig = {
+      mode: 'practice',
+      title: `Revision: Wrong Questions (${resultsData.wrongQuestionIds.length} Qs)`,
+      subjectIds: [],
+      topicIds: [],
+      questionCount: resultsData.wrongQuestionIds.length,
+      marksPerCorrect: 1,
+      negativeMarks: 0,
+      shuffleQuestions: true,
+      shuffleOptions: false,
+      immediateFeedback: true,
+    };
+
+    await db.quizSessions.put({
+      id: newSessionId,
+      userId: currentUser.id,
+      title: newConfig.title,
+      mode: 'practice',
+      status: 'in_progress',
+      config: newConfig,
+      questionIds: resultsData.wrongQuestionIds,
+      answers: {},
+      currentQuestionIndex: 0,
+      startedAt: Date.now(),
+      completedAt: null,
+      totalTimeSpentMs: 0,
+    });
+
+    window.location.reload();
+  };
+
+  // Format Timer Strings
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  // ================= RESULTS SCREEN =================
   if (isCompleted && resultsData) {
     return (
-      <div className="max-w-2xl mx-auto space-y-6 py-6 animate-fade-in">
-        <Card className="p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl space-y-6">
-          <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-500 mx-auto flex items-center justify-center">
-            <CheckCircle2 className="w-8 h-8" />
+      <div className="max-w-2xl mx-auto space-y-6 pb-16 animate-fade-in">
+        <Card className="p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-brand-50 dark:bg-brand-950 border border-brand-500/30 text-brand-600 dark:text-brand-400 flex items-center justify-center mx-auto text-2xl">
+            {resultsData.accuracy >= 75 ? '🎉' : '📊'}
           </div>
 
-          <div className="text-center">
-            <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Practice Complete!</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              Your practice attempt has been recorded in your study analytics.
+          <div>
+            <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white">
+              {isExamMode ? 'Exam Completed' : 'Practice Finished'}
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Time Used: <strong>{resultsData.timeSpentFormatted}</strong> • {session?.title}
             </p>
           </div>
 
-          {/* 4 Score Highlights */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-center">
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Accuracy</p>
-              <p className="text-2xl font-bold text-brand-600 dark:text-brand-400 mt-0.5">{resultsData.accuracy}%</p>
+          {/* 4 Main Score Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-800">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Score</span>
+              <p className="text-xl font-extrabold text-slate-900 dark:text-white mt-0.5">{resultsData.score}</p>
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Correct</p>
-              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{resultsData.correct}</p>
+
+            <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-500/30">
+              <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Correct</span>
+              <p className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">{resultsData.correct}</p>
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Wrong</p>
-              <p className="text-2xl font-bold text-rose-500 mt-0.5">{resultsData.wrong}</p>
+
+            <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-500/30">
+              <span className="text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider">Wrong</span>
+              <p className="text-xl font-extrabold text-rose-600 dark:text-rose-400 mt-0.5">{resultsData.wrong}</p>
             </div>
-            <div>
-              <p className="text-[11px] font-semibold text-slate-400 uppercase">Avg / Question</p>
-              <p className="text-2xl font-bold text-slate-900 dark:text-white mt-0.5">{resultsData.avgTimePerQuestion}</p>
+
+            <div className="p-3.5 rounded-2xl bg-brand-50 dark:bg-brand-950/40 border border-brand-500/30">
+              <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider">Accuracy</span>
+              <p className="text-xl font-extrabold text-brand-600 dark:text-brand-400 mt-0.5">{resultsData.accuracy}%</p>
             </div>
           </div>
 
-          {/* Breakdown by Topic */}
-          {Object.keys(resultsData.topicBreakdown).length > 0 && (
-            <div className="space-y-3">
-              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Topic Breakdown
-              </h4>
-              <div className="space-y-2">
-                {Object.entries(resultsData.topicBreakdown).map(([top, st]) => (
-                  <div
-                    key={top}
-                    className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between text-xs"
-                  >
-                    <div>
-                      <span className="font-bold text-slate-900 dark:text-white">{top}</span>
-                      <p className="text-[10px] text-slate-400">{st.correct} / {st.total} correct</p>
-                    </div>
-                    <Badge variant={st.pct >= 75 ? 'success' : st.pct >= 50 ? 'warning' : 'danger'}>
-                      {st.pct}%
+          {/* Topic-wise Breakdown */}
+          <div className="text-left space-y-3 pt-2">
+            <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+              Topic-Wise Accuracy Breakdown
+            </h4>
+            <div className="space-y-2">
+              {Object.entries(resultsData.topicBreakdown).map(([topName, data]) => (
+                <div
+                  key={topName}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between text-xs"
+                >
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-xs">{topName}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-slate-500">{data.correct} / {data.total}</span>
+                    <Badge variant={data.pct >= 75 ? 'success' : data.pct >= 50 ? 'warning' : 'danger'} size="sm">
+                      {data.pct}%
                     </Badge>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
 
           {/* Action Buttons */}
-          <div className="space-y-2.5 pt-2">
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              {resultsData.wrongQuestionIds.length > 0 && (
-                <Button
-                  variant="warning"
-                  className="flex-1"
-                  leftIcon={<RotateCcw className="w-4 h-4" />}
-                  onClick={() => {
-                    setIsCompleted(false);
-                    setCurrentIndex(0);
-                  }}
-                >
-                  Practice Wrong Questions ({resultsData.wrongQuestionIds.length})
-                </Button>
-              )}
-
+          <div className="space-y-2.5 pt-4 border-t border-slate-200 dark:border-slate-800">
+            {resultsData.wrongQuestionIds.length > 0 && (
               <Button
-                variant="outline"
-                className="flex-1 border-amber-500/30 text-amber-600 dark:text-amber-300"
-                leftIcon={<Sparkles className="w-4 h-4 text-amber-500" />}
-                onClick={() => setIsAIModalOpen(true)}
+                variant="primary"
+                size="lg"
+                className="w-full font-bold"
+                leftIcon={<RotateCcw className="w-4 h-4" />}
+                onClick={handlePracticeWrongQuestions}
               >
-                Build AI Revision Set
+                Practice {resultsData.wrongQuestionIds.length} Wrong Questions Now
               </Button>
-            </div>
+            )}
 
             <Button
-              variant="primary"
-              className="w-full"
+              variant="outline"
+              size="lg"
+              className="w-full font-semibold"
               onClick={onExit}
             >
-              Back to Dashboard
+              Back to Question Bank / Dashboard
             </Button>
           </div>
         </Card>
-
-        {/* AI Revision Builder Modal */}
-        <AIStudyBuilderModal
-          isOpen={isAIModalOpen}
-          onClose={() => setIsAIModalOpen(false)}
-          initialTargetId={session?.targetId}
-        />
       </div>
     );
   }
 
-  if (!currentQuestion) {
-    return (
-      <div className="text-center py-12 text-slate-400">
-        Loading question...
-      </div>
-    );
-  }
-
-  const isCorrect = selectedOption === currentQuestion.correctOptionId;
-  const progressPct = Math.round(((currentIndex + 1) / questionIds.length) * 100);
-
+  // ================= ACTIVE PRACTICE RUNNER =================
   return (
-    <div className="max-w-3xl mx-auto space-y-5 pb-12 animate-fade-in">
-      {/* Top Header Progress */}
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="xs" onClick={onExit}>
-          ✕ Exit Practice
-        </Button>
-        <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+    <div className="max-w-3xl mx-auto space-y-5 pb-16 animate-fade-in">
+      {/* Top Runner Header Bar */}
+      <div className="flex items-center justify-between bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        <button
+          type="button"
+          onClick={onExit}
+          className="text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white"
+        >
+          ✕ Exit
+        </button>
+
+        <div className="text-xs font-bold text-slate-900 dark:text-white">
           Question {currentIndex + 1} of {questionIds.length}
-        </span>
-        <Button variant="outline" size="xs" onClick={finishPractice}>
-          Finish Practice
+        </div>
+
+        {/* Live Countdown Clock for Exam Mode, or Elapsed for Practice */}
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-brand-50 dark:bg-brand-950/60 border border-brand-200 dark:border-brand-800 text-brand-700 dark:text-brand-300 text-xs font-bold font-mono">
+          <Clock className="w-3.5 h-3.5" />
+          <span>{isExamMode ? `${formatCountdown(remainingSeconds)} Left` : formatCountdown(elapsedSeconds)}</span>
+        </div>
+
+        <Button variant="outline" size="sm" onClick={finishPractice}>
+          Submit Test
         </Button>
       </div>
 
-      <ProgressBar progress={progressPct} size="xs" />
-
-      {/* Main Question Card */}
-      <Card className="p-6 sm:p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
+      {/* Question Card */}
+      {currentQuestion ? (
+        <Card className="p-6 sm:p-8 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-6">
+          {/* Question Tag Bar */}
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800/80 pb-3">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold text-brand-600 dark:text-brand-400 uppercase tracking-wider">
-                {currentQuestion.source || 'Exam Bank'}
-              </span>
-              {currentQuestion.difficulty && (
-                <Badge variant={currentQuestion.difficulty === 'easy' ? 'success' : currentQuestion.difficulty === 'medium' ? 'warning' : 'danger'}>
-                  {currentQuestion.difficulty}
-                </Badge>
-              )}
+              <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{currentIndex + 1}</span>
+              <Badge variant={currentQuestion.difficulty === 'hard' ? 'danger' : 'warning'} size="sm">
+                {currentQuestion.difficulty}
+              </Badge>
             </div>
-            <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed">
-              {currentQuestion.questionText}
-            </h3>
-          </div>
 
-          {/* Quick Question Tools (Bookmark, Flag Difficult) */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={handleToggleBookmark}
-              className={`p-2 rounded-xl border transition-colors ${
-                currentQuestion.isBookmarked
-                  ? 'border-amber-500 bg-amber-500/10 text-amber-500'
-                  : 'border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
-              }`}
-              title="Bookmark Question"
-            >
-              <Bookmark className={`w-4 h-4 ${currentQuestion.isBookmarked ? 'fill-current' : ''}`} />
-            </button>
-
-            <button
-              onClick={handleToggleDifficult}
-              className={`p-2 rounded-xl border transition-colors ${
-                currentQuestion.isDifficult
-                  ? 'border-rose-500 bg-rose-500/10 text-rose-500'
-                  : 'border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
-              }`}
-              title="Mark as Difficult"
-            >
-              <AlertOctagon className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Options */}
-        <div className="space-y-3">
-          {currentQuestion.options.map(option => {
-            const isSelected = selectedOption === option.id;
-            const isThisOptionCorrect = currentQuestion.correctOptionId === option.id;
-
-            let optionStyle = 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 hover:border-slate-300 dark:hover:border-slate-700';
-
-            if (isAnswered) {
-              if (isThisOptionCorrect) {
-                optionStyle = 'border-emerald-500 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold ring-1 ring-emerald-500';
-              } else if (isSelected && !isThisOptionCorrect) {
-                optionStyle = 'border-rose-500 bg-rose-500/10 text-rose-700 dark:text-rose-300 font-semibold ring-1 ring-rose-500';
-              }
-            } else if (isSelected) {
-              optionStyle = 'border-brand-500 bg-brand-500/10 text-brand-700 dark:text-white ring-1 ring-brand-500';
-            }
-
-            return (
+            <div className="flex items-center gap-1">
               <button
-                key={option.id}
-                onClick={() => handleSelectOption(option.id)}
-                disabled={isAnswered}
-                className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between gap-4 transition-all ${optionStyle}`}
+                type="button"
+                onClick={handleToggleBookmark}
+                className={`p-1.5 rounded-lg border text-xs ${
+                  currentQuestion.isBookmarked
+                    ? 'bg-amber-50 dark:bg-amber-950 border-amber-400 text-amber-600'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-600'
+                }`}
+                title="Bookmark Question"
               >
-                <div className="flex items-center gap-3">
-                  <span className="w-6 h-6 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-xs font-bold shrink-0">
-                    {option.id}
-                  </span>
-                  <span className="text-xs sm:text-sm font-medium">{option.text}</span>
-                </div>
-
-                {isAnswered && (
-                  <div>
-                    {isThisOptionCorrect ? (
-                      <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    ) : isSelected ? (
-                      <X className="w-4 h-4 text-rose-500" />
-                    ) : null}
-                  </div>
-                )}
+                <Bookmark className="w-3.5 h-3.5" />
               </button>
-            );
-          })}
-        </div>
-
-        {/* Solution Drawer (Instant explanation) */}
-        {isAnswered && (
-          <div className={`p-4 rounded-2xl border animate-slide-up ${
-            isCorrect ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-rose-500/5 border-rose-500/30'
-          }`}>
-            <div className="flex items-center gap-2 mb-1.5">
-              {isCorrect ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              ) : (
-                <XCircle className="w-4 h-4 text-rose-500" />
-              )}
-              <span className={`text-xs font-bold uppercase tracking-wider ${
-                isCorrect ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
-              }`}>
-                {isCorrect ? 'Correct Answer!' : `Incorrect — Correct Answer is Option ${currentQuestion.correctOptionId}`}
-              </span>
             </div>
-
-            {currentQuestion.explanation && (
-              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed pl-6">
-                {currentQuestion.explanation}
-              </p>
-            )}
           </div>
-        )}
 
-        {/* Navigation Controls */}
-        <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<ChevronLeft className="w-4 h-4" />}
-            onClick={handlePrev}
-            disabled={currentIndex === 0}
-          >
-            Previous
-          </Button>
+          {/* Statement */}
+          <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed">
+            {currentQuestion.questionText}
+          </h3>
 
-          <Button
-            variant="primary"
-            size="sm"
-            rightIcon={<ChevronRight className="w-4 h-4" />}
-            onClick={handleNext}
-          >
-            {currentIndex === questionIds.length - 1 ? 'Finish Practice' : 'Next Question'}
-          </Button>
-        </div>
-      </Card>
+          {/* Options */}
+          <div className="space-y-3">
+            {currentQuestion.options.map(opt => {
+              const isSelected = selectedOption === opt.id;
+              const isCorrectAnswer = opt.id === currentQuestion.correctOptionId;
+
+              let style = 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200';
+
+              if (isExamMode) {
+                // Exam Mode: Only show selected option, no answers revealed
+                if (isSelected) {
+                  style = 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 text-brand-900 dark:text-brand-100 ring-1 ring-brand-500 font-semibold';
+                }
+              } else if (isAnswered) {
+                // Practice Mode: Instant color feedback
+                if (isCorrectAnswer) {
+                  style = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-900 dark:text-emerald-200 font-semibold ring-1 ring-emerald-500';
+                } else if (isSelected && !isCorrectAnswer) {
+                  style = 'bg-rose-50 dark:bg-rose-950/40 border-rose-500 text-rose-900 dark:text-rose-200 font-semibold ring-1 ring-rose-500';
+                }
+              } else if (isSelected) {
+                style = 'bg-brand-50 dark:bg-brand-950/40 border-brand-500 text-brand-900 dark:text-brand-100 ring-1 ring-brand-500';
+              }
+
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => handleSelectOption(opt.id)}
+                  className={`w-full p-4 rounded-xl border text-left text-xs sm:text-sm flex items-center gap-3.5 transition-all ${style}`}
+                >
+                  <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                    isSelected ? 'bg-brand-600 text-white' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-600'
+                  }`}>
+                    {opt.id}
+                  </span>
+                  <span className="flex-1 leading-snug">{opt.text}</span>
+
+                  {!isExamMode && isAnswered && isCorrectAnswer && (
+                    <Check className="w-5 h-5 text-emerald-600 shrink-0" />
+                  )}
+                  {!isExamMode && isAnswered && isSelected && !isCorrectAnswer && (
+                    <X className="w-5 h-5 text-rose-600 shrink-0" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Explanation in Practice Mode */}
+          {!isExamMode && isAnswered && currentQuestion.explanation && (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 space-y-1">
+              <span className="font-bold text-slate-900 dark:text-white">Explanation:</span>
+              <p>{currentQuestion.explanation}</p>
+            </div>
+          )}
+
+          {/* Bottom Navigation */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800/80">
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<ChevronLeft className="w-4 h-4" />}
+              onClick={handlePrev}
+              disabled={currentIndex === 0}
+            >
+              Previous
+            </Button>
+
+            <Button
+              variant="primary"
+              size="sm"
+              rightIcon={<ChevronRight className="w-4 h-4" />}
+              onClick={handleNext}
+            >
+              {currentIndex === questionIds.length - 1 ? 'Finish & Submit' : 'Next Question'}
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-8 text-center text-slate-400">Loading question...</Card>
+      )}
     </div>
   );
 };
