@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   BarChart3,
   Layers,
+  Upload,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -219,54 +220,66 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* ================= 4 CLEAN SNAPSHOT CARDS ================= */}
+      {/* ================= 4 CLEAN SNAPSHOT CARDS (CUBIC STYLE) ================= */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Focus Time</span>
-            <Clock className="w-4 h-4 text-brand-600 dark:text-brand-400" />
+        {/* 1. Focus Time */}
+        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#7f56d9]/40 transition-all">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Focus Time</span>
+            <div className="w-9 h-9 rounded-xl bg-[#f4ebff] dark:bg-[#2c1c5f] text-[#7f56d9] flex items-center justify-center shadow-xs">
+              <Clock className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
+          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
             {formatMins(totalStudiedMinutesToday)}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Goal: {formatMins(totalPlannedMinutesToday)}</p>
+          <p className="text-[11px] text-[#667085] mt-1 font-medium">Goal: {formatMins(totalPlannedMinutesToday)}</p>
         </Card>
 
-        <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Daily Goal</span>
-            <TargetIcon className="w-4 h-4 text-emerald-500" />
+        {/* 2. Daily Goal */}
+        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#12b76a]/40 transition-all">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Daily Goal</span>
+            <div className="w-9 h-9 rounded-xl bg-[#ecfdf3] dark:bg-[#054f31] text-[#12b76a] flex items-center justify-center shadow-xs">
+              <TargetIcon className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
+          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
             {todayGoalCompletion}%
           </div>
-          <div className="mt-2">
-            <ProgressBar progress={todayGoalCompletion} size="sm" color={todayGoalCompletion >= 100 ? 'bg-emerald-500' : 'bg-brand-600'} />
+          <div className="mt-2.5">
+            <ProgressBar progress={todayGoalCompletion} size="sm" color={todayGoalCompletion >= 100 ? 'bg-[#12b76a]' : 'bg-[#7f56d9]'} />
           </div>
         </Card>
 
-        <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">MCQs Today</span>
-            <BookOpen className="w-4 h-4 text-blue-500" />
+        {/* 3. MCQs Today */}
+        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#0284c7]/40 transition-all">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">MCQs Today</span>
+            <div className="w-9 h-9 rounded-xl bg-[#f0f9ff] dark:bg-[#0c4a6e] text-[#0284c7] flex items-center justify-center shadow-xs">
+              <BookOpen className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
+          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
             {todayAttemptCount}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-[11px] text-[#667085] mt-1 font-medium">
             {todayCorrectCount > 0 ? `${todayCorrectCount} correct answers` : 'No attempts logged today'}
           </p>
         </Card>
 
-        <Card className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 shadow-xs">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Accuracy</span>
-            <TrendingUp className="w-4 h-4 text-indigo-500" />
+        {/* 4. Accuracy */}
+        <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs hover:border-[#f79009]/40 transition-all">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8] uppercase tracking-wider">Accuracy</span>
+            <div className="w-9 h-9 rounded-xl bg-[#fffaeb] dark:bg-[#4e2d09] text-[#f79009] flex items-center justify-center shadow-xs">
+              <TrendingUp className="w-4 h-4" />
+            </div>
           </div>
-          <div className="text-2xl font-extrabold text-slate-900 dark:text-white">
+          <div className="text-2xl font-extrabold text-[#101828] dark:text-[#f8f9fc]">
             {todayAccuracy !== null ? `${todayAccuracy}%` : '—'}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-[11px] text-[#667085] mt-1 font-medium">
             {todayAccuracy !== null ? (todayAccuracy >= 75 ? 'Strong recall' : 'Review recommended') : 'No questions practiced yet'}
           </p>
         </Card>
@@ -280,12 +293,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Today's Study Plan</h3>
-                <p className="text-xs text-slate-500">Pick a course or subject to start your focused study session</p>
+                <h3 className="text-base font-bold text-[#101828] dark:text-[#f8f9fc]">Today's Study Plan</h3>
+                <p className="text-xs text-[#475467] dark:text-[#9496a8]">Pick a course or subject to start your focused study session</p>
               </div>
               <button
                 onClick={() => onNavigate('targets')}
-                className="text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline flex items-center gap-1"
+                className="text-xs font-bold text-[#6941c6] dark:text-[#b692f6] hover:underline flex items-center gap-1"
               >
                 <span>Manage Courses</span>
                 <ChevronRight className="w-3.5 h-3.5" />
@@ -302,45 +315,43 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
                 return (
                   <Card
                     key={target.id}
-                    className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-brand-300 dark:hover:border-brand-700 transition-all flex flex-col justify-between"
+                    className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs space-y-4 hover:border-[#7f56d9]/50 transition-all"
                   >
-                    <div>
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2.5">
-                          <div
-                            className="w-3 h-3 rounded-full shrink-0"
-                            style={{ backgroundColor: target.color || '#6366f1' }}
-                          />
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                            {target.name}
-                          </h4>
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: target.color || '#7f56d9' }}
+                        />
+                        <div>
+                          <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{target.name}</h4>
+                          <p className="text-[11px] text-[#667085] font-medium">
+                            {formatMins(studied)} / {formatMins(planned)}
+                          </p>
                         </div>
-                        {isComplete && (
-                          <Badge variant="success" size="sm" className="shrink-0 flex items-center gap-1">
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>Done</span>
-                          </Badge>
-                        )}
                       </div>
 
-                      <div className="flex items-center justify-between text-xs text-slate-500 mb-2">
-                        <span>{formatMins(studied)} / {formatMins(planned)}</span>
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">{pct}%</span>
-                      </div>
-                      <ProgressBar progress={pct} size="sm" color={isComplete ? 'bg-emerald-500' : 'bg-brand-600'} />
+                      {isComplete ? (
+                        <span className="px-2 py-0.5 rounded-full bg-[#ecfdf3] text-[#027a48] border border-[#a6f4c5] text-[10px] font-bold flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" />
+                          <span>Done</span>
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold text-[#475467] dark:text-[#9496a8]">{pct}%</span>
+                      )}
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
-                      <Button
-                        variant={isComplete ? 'outline' : 'primary'}
-                        size="sm"
-                        className="w-full text-xs font-bold"
-                        leftIcon={<Play className="w-3.5 h-3.5" />}
-                        onClick={() => handleStartTargetFocus(target)}
-                      >
-                        {studied > 0 ? 'Continue Focus' : 'Start Focus'}
-                      </Button>
-                    </div>
+                    <ProgressBar progress={pct} size="sm" color={isComplete ? 'bg-[#12b76a]' : 'bg-[#7f56d9]'} />
+
+                    <Button
+                      variant={isComplete ? 'outline' : 'primary'}
+                      size="sm"
+                      className="w-full font-bold text-xs"
+                      leftIcon={<Play className="w-3.5 h-3.5 fill-current" />}
+                      onClick={() => handleStartTargetFocus(target)}
+                    >
+                      {studied > 0 ? 'Continue Focus' : 'Start Focus'}
+                    </Button>
                   </Card>
                 );
               })}
@@ -349,43 +360,45 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
 
           {/* Practice & Question Bank Quick Panels */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Card className="p-5 border-slate-200 dark:border-slate-800 bg-linear-to-br from-indigo-500/5 to-purple-500/5 border-l-4 border-l-brand-600 flex flex-col justify-between">
+            <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] border-l-4 border-l-[#7f56d9] flex flex-col justify-between shadow-xs">
               <div>
-                <div className="flex items-center gap-2 text-brand-700 dark:text-brand-300 font-bold text-sm mb-1">
+                <div className="flex items-center gap-2 text-[#6941c6] dark:text-[#b692f6] font-bold text-sm mb-1">
                   <BookOpen className="w-4 h-4" />
                   <span>MCQ Practice & Tests</span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                <p className="text-xs text-[#475467] dark:text-[#9496a8] mb-3">
                   Test your knowledge by topic, mix multiple topics, or run real timed exams with instant scoring.
                 </p>
               </div>
               <Button
-                variant="primary"
+                variant="outline"
                 size="sm"
-                className="w-full"
+                className="w-full text-xs font-bold bg-white dark:bg-[#1a1f30] text-[#344054] dark:text-[#eceef2] border-[#d0d5dd] dark:border-[#344054]"
+                leftIcon={<Play className="w-3.5 h-3.5 text-[#7f56d9]" />}
                 onClick={() => onNavigate('practice')}
               >
                 Open Practice Room →
               </Button>
             </Card>
 
-            <Card className="p-5 border-slate-200 dark:border-slate-800 bg-linear-to-br from-blue-500/5 to-cyan-500/5 border-l-4 border-l-blue-600 flex flex-col justify-between">
+            <Card className="p-5 border-[#eaecf0] dark:border-[#23293d] bg-white dark:bg-[#141824] border-l-4 border-l-[#0284c7] flex flex-col justify-between shadow-xs">
               <div>
-                <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300 font-bold text-sm mb-1">
-                  <FileText className="w-4 h-4" />
+                <div className="flex items-center gap-2 text-[#0284c7] dark:text-[#38bdf8] font-bold text-sm mb-1">
+                  <Upload className="w-4 h-4" />
                   <span>Upload Question Papers</span>
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
-                  Upload PDF question sheets to store them directly into your Question Bank without manual review.
+                <p className="text-xs text-[#475467] dark:text-[#9496a8] mb-3">
+                  Upload PDF question sheets to store them directly into your question bank and start testing immediately.
                 </p>
               </div>
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                className="w-full text-xs font-bold bg-white dark:bg-[#1a1f30] text-[#344054] dark:text-[#eceef2] border-[#d0d5dd] dark:border-[#344054]"
+                leftIcon={<Upload className="w-3.5 h-3.5 text-[#0284c7]" />}
                 onClick={() => onNavigate('questions', { openUpload: true })}
               >
-                Upload Questions →
+                Upload PDF →
               </Button>
             </Card>
           </div>

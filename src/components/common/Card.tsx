@@ -17,14 +17,14 @@ export const Card: React.FC<CardProps> = ({
   const base = 'rounded-2xl transition-all duration-200';
 
   const variants = {
-    default: 'bg-slate-900/80 border border-slate-800 text-slate-100 backdrop-blur-sm',
-    elevated: 'bg-slate-900 border border-slate-800/80 shadow-xl shadow-black/40 text-slate-100',
-    glass: 'bg-slate-900/60 backdrop-blur-md border border-slate-800/60 shadow-lg text-slate-100',
-    interactive: 'bg-slate-900/90 border border-slate-800 text-slate-100 hover:border-slate-700 hover:bg-slate-800/80 cursor-pointer',
-    outline: 'bg-transparent border border-slate-800 text-slate-100',
+    default: 'bg-white dark:bg-[#151928] border border-[#eaecf0] dark:border-[#22283a] text-[#101828] dark:text-[#f8f9fc] shadow-xs',
+    elevated: 'bg-white dark:bg-[#181d2f] border border-[#eaecf0] dark:border-[#22283a] shadow-md text-[#101828] dark:text-[#f8f9fc]',
+    glass: 'bg-white/90 dark:bg-[#151928]/80 backdrop-blur-md border border-[#eaecf0] dark:border-[#22283a] shadow-xs text-[#101828] dark:text-[#f8f9fc]',
+    interactive: 'bg-white dark:bg-[#151928] border border-[#eaecf0] dark:border-[#22283a] text-[#101828] dark:text-[#f8f9fc] hover:border-[#6941c6]/40 hover:shadow-md cursor-pointer',
+    outline: 'bg-transparent border border-[#eaecf0] dark:border-[#22283a] text-[#101828] dark:text-[#f8f9fc]',
   };
 
-  const hover = hoverEffect ? 'hover:border-brand-500/50 hover:shadow-brand-500/10 hover:shadow-lg hover:-translate-y-0.5' : '';
+  const hover = hoverEffect ? 'hover:border-[#6941c6] hover:shadow-md hover:-translate-y-0.5' : '';
 
   return (
     <div className={twMerge(clsx(base, variants[variant], hover, className))} {...props}>
