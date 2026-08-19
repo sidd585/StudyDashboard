@@ -7,7 +7,7 @@ import { StudyTimerModal } from './StudyTimerModal';
 interface AppLayoutProps {
   children: React.ReactNode;
   currentPage: PageId;
-  onNavigate: (page: PageId) => void;
+  onNavigate: (page: PageId, params?: any) => void;
   studyStreak?: number;
 }
 
@@ -35,7 +35,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       <MobileNav currentPage={currentPage} onNavigate={onNavigate} />
 
       {/* Global Study Timer Modal */}
-      <StudyTimerModal />
+      <StudyTimerModal
+        onNavigatePractice={(targetId) => onNavigate('practice', { targetId })}
+      />
     </div>
   );
 };

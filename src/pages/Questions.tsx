@@ -7,7 +7,6 @@ import { Button } from '../components/common/Button';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import {
-  HelpCircle,
   Plus,
   Upload,
   Search,
@@ -18,13 +17,17 @@ import {
   Share2,
   Sparkles,
   Eye,
+  EyeOff,
   Check,
   RotateCcw,
   CheckSquare,
+  Play,
+  Filter,
 } from 'lucide-react';
 import { importMCQsFromPDF, importMCQsFromText } from '../services/import';
+import { AIStudyBuilderModal } from '../components/ai/AIStudyBuilderModal';
 import type { ParsedMCQCandidate, ImportDiagnostics } from '../services/import/types';
-import type { Question, Difficulty } from '../types';
+import type { Question, Difficulty, QuestionOrigin } from '../types';
 
 export const Questions: React.FC = () => {
   const { currentUser } = useUser();
@@ -36,12 +39,17 @@ export const Questions: React.FC = () => {
 
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [originFilter, setOriginFilter] = useState<string>('all');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Answer visibility toggle state per question in list
+  const [revealedAnswers, setRevealedAnswers] = useState<Record<string, boolean>>({});
 
   // Modal States
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isAIModalOpen, setIsAIModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [viewSourceId, setViewSourceId] = useState<string | null>(null);
 
@@ -56,12 +64,13 @@ export const Questions: React.FC = () => {
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [isShared, setIsShared] = useState(true);
 
-  // Ingestion / Review state
+  // Ingestion / PDF Review state
   const [extractedReviewList, setExtractedReviewList] = useState<ParsedMCQCandidate[]>([]);
   const [diagnostics, setDiagnostics] = useState<ImportDiagnostics | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractingStage, setExtractingStage] = useState<string>('Reading PDF...');
   const [rawPastedText, setRawPastedText] = useState('');
+  const [reviewFilter, setReviewFilter] = useState<'all' | 'needs_attention' | 'valid'>('all');
 
   const subjects = useLiveQuery(
     () => (selectedTargetId ? db.subjects.where('targetId').equals(selectedTargetId).toArray() : []),
@@ -82,6 +91,9 @@ export const Questions: React.FC = () => {
       if (difficultyFilter !== 'all') {
         list = list.filter(item => item.difficulty === difficultyFilter);
       }
+      if (originFilter !== 'all') {
+        list = list.filter(item => item.origin === originFilter);
+      }
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
         list = list.filter(item =>
@@ -91,8 +103,15 @@ export const Questions: React.FC = () => {
       }
       return list;
     },
-    [currentUser.id, selectedTargetId, selectedSubjectId, difficultyFilter, searchQuery]
+    [currentUser.id, selectedTargetId, selectedSubjectId, difficultyFilter, originFilter, searchQuery]
   ) || [];
+
+  const toggleAnswerReveal = (questionId: string) => {
+    setRevealedAnswers(prev => ({
+      ...prev,
+      [questionId]: !prev[questionId],
+    }));
+  };
 
   // Handle Save Manual Question
   const handleSaveManual = async (e: React.FormEvent) => {
@@ -117,6 +136,7 @@ export const Questions: React.FC = () => {
       explanation: explanation.trim(),
       source: 'Manual Entry',
       difficulty,
+      origin: 'USER_CREATED',
       isShared,
       isBookmarked: false,
       isDifficult: false,
@@ -143,50 +163,49 @@ export const Questions: React.FC = () => {
     setIsManualModalOpen(false);
   };
 
-  // Handle Text / PDF extraction using the new state-machine engine
+  // Handle Text / PDF extraction
   const handleExtractText = () => {
     const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
     if (!rawPastedText.trim() || !targetId) {
       alert('Please select a target and provide MCQ text.');
       return;
     }
+
     const result = importMCQsFromText(rawPastedText, {
       defaultTargetId: targetId,
       defaultSubjectId: selectedSubjectId || undefined,
+      sourceFileName: 'Manual Paste / Text',
     });
+
     if (result.questions.length > 0) {
       setExtractedReviewList(result.questions);
       setDiagnostics(result.diagnostics);
       setIsUploadModalOpen(false);
       setIsReviewModalOpen(true);
     } else {
-      alert('No MCQs could be identified. Make sure each question has numbered statements (1., 2.) and options (A., B., C., D.).');
+      alert('No MCQs could be detected in the pasted text. Please verify formatting.');
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
     if (!file) return;
+
+    const targetId = selectedTargetId || (targets.length > 0 ? targets[0].id : '');
     if (!targetId) {
-      alert('Please create or select a study target first.');
+      alert('Please select a target before uploading a document.');
       return;
     }
 
     setIsExtracting(true);
-    setExtractingStage('Reading file...');
+    setExtractingStage('Connecting to document processor...');
     try {
-      const isPdfOrImage = file.type === 'application/pdf' || 
-                           file.name.toLowerCase().endsWith('.pdf') ||
-                           file.type.startsWith('image/') ||
-                           /\.(png|jpe?g)$/i.test(file.name);
-
-      if (isPdfOrImage) {
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        setExtractingStage('Extracting text & running OCR if needed...');
         const result = await importMCQsFromPDF(file, {
           defaultTargetId: targetId,
           defaultSubjectId: selectedSubjectId || undefined,
           sourceFileName: file.name,
-          onProgress: (stage) => setExtractingStage(stage),
         });
 
         if (result.questions.length > 0) {
@@ -195,7 +214,7 @@ export const Questions: React.FC = () => {
           setIsUploadModalOpen(false);
           setIsReviewModalOpen(true);
         } else {
-          alert('Could not extract valid questions from this document.');
+          alert('Could not detect questions in this PDF. Please check if file is password protected or corrupted.');
         }
       } else {
         const rawText = await file.text();
@@ -223,10 +242,10 @@ export const Questions: React.FC = () => {
   };
 
   // Bulk Save Approved Questions to Dexie Question Bank
-  const handleSaveApprovedToBank = async () => {
-    const approved = extractedReviewList.filter(q => q.approved && q.questionText.trim());
+  const handleSaveApprovedToBank = async (onlyValid: boolean = false) => {
+    const approved = extractedReviewList.filter(q => (onlyValid ? q.status === 'valid' && q.approved : q.approved) && q.questionText.trim());
     if (approved.length === 0) {
-      alert('No approved questions to save. Please review and approve at least one question.');
+      alert('No approved questions to save. Please review and approve questions.');
       return;
     }
 
@@ -253,10 +272,11 @@ export const Questions: React.FC = () => {
         topicId: q.topicId || undefined,
         questionText: cleanQuestionText,
         options,
-        correctOptionId: q.detectedAnswer || 'A',
+        correctOptionId: q.detectedAnswer || null,
         explanation: q.explanation ? q.explanation.trim() : '',
         source: q.sourceFileName || 'Imported PDF Bank',
         difficulty: q.difficulty || 'medium',
+        origin: 'IMPORTED_OLD_QUESTION' as QuestionOrigin,
         isShared: true,
         isBookmarked: false,
         isDifficult: false,
@@ -289,27 +309,46 @@ export const Questions: React.FC = () => {
   };
 
   const totalCount = extractedReviewList.length;
+  const validCount = extractedReviewList.filter(q => q.status === 'valid').length;
+  const needsAttentionCount = totalCount - validCount;
   const approvedCount = extractedReviewList.filter(q => q.approved).length;
 
+  const filteredReviewList = extractedReviewList.filter(q => {
+    if (reviewFilter === 'needs_attention') return q.status !== 'valid';
+    if (reviewFilter === 'valid') return q.status === 'valid';
+    return true;
+  });
+
   return (
-    <div className="space-y-6 pb-12 animate-fade-in">
+    <div className="space-y-6 pb-12 animate-fade-in max-w-6xl mx-auto">
       {/* Header Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">MCQ Question Bank</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Question Bank</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Organize questions by Target and Subject with zero answer exposure during practice.
+            Manage your verified old questions, AI blueprints, and practice bank.
           </p>
         </div>
 
+        {/* Quick Action Buttons */}
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            leftIcon={<Upload className="w-4 h-4" />}
+            leftIcon={<Upload className="w-4 h-4 text-blue-500" />}
             onClick={() => setIsUploadModalOpen(true)}
           >
-            Import PDF / Text
+            Upload PDF
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-amber-500/40 text-amber-600 dark:text-amber-300 hover:bg-amber-500/10"
+            leftIcon={<Sparkles className="w-4 h-4 text-amber-500" />}
+            onClick={() => setIsAIModalOpen(true)}
+          >
+            Ask AI
           </Button>
 
           <Button
@@ -324,8 +363,8 @@ export const Questions: React.FC = () => {
       </div>
 
       {/* Filter Bar */}
-      <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-sm space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <Card className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           {/* Target Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Target</label>
@@ -360,6 +399,23 @@ export const Questions: React.FC = () => {
             </select>
           </div>
 
+          {/* Origin Filter */}
+          <div>
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Origin</label>
+            <select
+              value={originFilter}
+              onChange={e => setOriginFilter(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+            >
+              <option value="all">All Origins</option>
+              <option value="IMPORTED_OLD_QUESTION">Imported Old Questions</option>
+              <option value="AI_PAST_PATTERN">AI Past-Pattern</option>
+              <option value="AI_GENERATED">AI Generated</option>
+              <option value="USER_CREATED">User Created</option>
+              <option value="SHARED">Shared Partner</option>
+            </select>
+          </div>
+
           {/* Difficulty Filter */}
           <div>
             <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Difficulty</label>
@@ -377,7 +433,7 @@ export const Questions: React.FC = () => {
 
           {/* Search Keyword */}
           <div>
-            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Search Keyword</label>
+            <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Search</label>
             <div className="relative">
               <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
               <input
@@ -400,42 +456,61 @@ export const Questions: React.FC = () => {
               <FileText className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Questions in Question Bank</h3>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Questions Found</h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-sm mx-auto">
-                Upload a past Nepal exam PDF (e.g. NRB / RBB) or add questions manually to build your practice bank.
+                Upload a past exam PDF, generate high-yield MCQs with AI, or add questions manually.
               </p>
             </div>
-            <Button
-              variant="primary"
-              size="sm"
-              leftIcon={<Upload className="w-4 h-4" />}
-              onClick={() => setIsUploadModalOpen(true)}
-            >
-              Import PDF Questions
-            </Button>
+            <div className="flex justify-center gap-2 pt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Upload className="w-4 h-4" />}
+                onClick={() => setIsUploadModalOpen(true)}
+              >
+                Upload PDF
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<Sparkles className="w-4 h-4" />}
+                onClick={() => setIsAIModalOpen(true)}
+              >
+                Build with AI
+              </Button>
+            </div>
           </Card>
         ) : (
           questions.map((q, idx) => {
+            const isRevealed = !!revealedAnswers[q.id];
             const cleanQuestionText = q.questionText
               .replace(/(?:Answer|Ans|Correct(?:\s+Answer)?)[\s\:\.\-\=]+[A-D].*$/i, '')
               .replace(/(?:Explanation|Solution|Sol)[\s\:\.\-\=]+.*$/i, '')
               .trim();
 
             return (
-              <Card key={q.id} className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm hover:border-slate-300 dark:hover:border-slate-700 transition-all">
-                <div className="flex items-start justify-between gap-3 mb-2.5">
-                  <div className="flex items-center gap-2">
+              <Card
+                key={q.id}
+                className="p-5 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:border-slate-300 dark:hover:border-slate-700 transition-all space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs font-bold text-brand-600 dark:text-brand-400">#{idx + 1}</span>
                     <Badge variant={q.difficulty === 'easy' ? 'success' : q.difficulty === 'medium' ? 'warning' : 'danger'}>
                       {q.difficulty}
                     </Badge>
+                    {q.origin && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-semibold border border-slate-200 dark:border-slate-700">
+                        {q.origin === 'IMPORTED_OLD_QUESTION' ? 'Old Question' : q.origin === 'AI_PAST_PATTERN' ? 'AI Past Pattern' : q.origin === 'AI_GENERATED' ? 'AI Generated' : 'User Created'}
+                      </span>
+                    )}
                     {q.isShared && (
                       <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 flex items-center gap-1">
                         <Share2 className="w-3 h-3" /> Shared
                       </span>
                     )}
                     {q.source && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500">
+                      <span className="text-[10px] text-slate-400 truncate max-w-[200px]">
                         {q.source}
                       </span>
                     )}
@@ -443,31 +518,33 @@ export const Questions: React.FC = () => {
 
                   <button
                     onClick={() => handleDeleteQuestion(q.id)}
-                    className="p-1 text-slate-400 hover:text-rose-500"
+                    className="p-1 text-slate-400 hover:text-rose-500 transition-colors"
                     title="Delete Question"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
 
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed mb-3">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
                   {cleanQuestionText}
                 </h4>
 
-                {/* Structured Options Preview */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                {/* Structured Options (DO NOT HIGHLIGHT ANSWER BY DEFAULT) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {q.options.map(opt => {
-                    const isCorrect = opt.id === q.correctOptionId;
+                    const isCorrectAnswer = isRevealed && opt.id === q.correctOptionId;
                     return (
                       <div
                         key={opt.id}
-                        className={`p-2.5 rounded-xl border text-xs flex items-center gap-2.5 ${
-                          isCorrect
-                            ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-700 dark:text-emerald-300 font-medium'
+                        className={`p-2.5 rounded-xl border text-xs flex items-center gap-2.5 transition-all ${
+                          isCorrectAnswer
+                            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-bold ring-1 ring-emerald-500/30'
                             : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
                         }`}
                       >
-                        <span className="w-5 h-5 rounded bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold shrink-0">
+                        <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                          isCorrectAnswer ? 'bg-emerald-500 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                        }`}>
                           {opt.id}
                         </span>
                         <span>{opt.text}</span>
@@ -476,9 +553,26 @@ export const Questions: React.FC = () => {
                   })}
                 </div>
 
-                {q.explanation && (
-                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-400">
-                    <strong className="text-slate-700 dark:text-slate-300">Explanation: </strong>
+                {/* View Answer & Explanation Toggle (Zero Spoilers while browsing) */}
+                <div className="pt-1 flex items-center justify-between">
+                  <button
+                    onClick={() => toggleAnswerReveal(q.id)}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-600 dark:text-brand-400 hover:underline"
+                  >
+                    {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    <span>{isRevealed ? 'Hide Answer' : 'View Answer'}</span>
+                  </button>
+
+                  {isRevealed && q.correctOptionId && (
+                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      Correct: Option {q.correctOptionId}
+                    </span>
+                  )}
+                </div>
+
+                {isRevealed && q.explanation && (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+                    <strong className="text-slate-900 dark:text-white">Explanation: </strong>
                     {q.explanation}
                   </div>
                 )}
@@ -530,10 +624,10 @@ export const Questions: React.FC = () => {
             <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Question Statement *</label>
             <textarea
               required
-              rows={3}
+              rows={2}
               value={questionText}
               onChange={e => setQuestionText(e.target.value)}
-              placeholder="e.g. Which device operates at the Network Layer of the OSI Model?"
+              placeholder="e.g. Which layer of the OSI model does a router operate at?"
               className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
             />
           </div>
@@ -712,205 +806,261 @@ export const Questions: React.FC = () => {
         </div>
       </Modal>
 
-      {/* Mandatory Review Modal */}
+      {/* Streamlined PDF / Document Import Review Modal with Sticky Action Bar */}
       <Modal
         isOpen={isReviewModalOpen}
         onClose={() => setIsReviewModalOpen(false)}
-        title="Review Extracted Questions"
+        title="Review Extracted Exam Questions"
         size="xl"
       >
-        <div className="space-y-4 max-h-[78vh] overflow-y-auto pr-1">
-          {/* Summary Diagnostics Bar */}
-          {diagnostics && (
-            <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-              <div className="flex items-center gap-4 text-xs">
-                <span className="font-bold text-slate-900 dark:text-white">Pages: {diagnostics.totalPages}</span>
-                <span className="text-brand-600 dark:text-brand-400 font-bold">Detected: {diagnostics.totalDetected}</span>
-                <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Valid: {diagnostics.validCount}</span>
-                <span className="text-amber-600 dark:text-amber-400 font-semibold">Needs Review: {diagnostics.needsReviewCount}</span>
-                <span className="text-blue-600 dark:text-blue-400 font-semibold">Answers Mapped: {diagnostics.answersMappedCount}</span>
-              </div>
-
+        <div className="space-y-4">
+          {/* Summary Banner with Instant Action Buttons */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
               <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  leftIcon={<CheckSquare className="w-3.5 h-3.5" />}
-                  onClick={() => {
-                    const updated = extractedReviewList.map(q => ({
-                      ...q,
-                      approved: q.confidence === 'high' && q.status === 'valid',
-                    }));
-                    setExtractedReviewList(updated);
-                  }}
-                >
-                  Approve High Confidence Only
-                </Button>
-
-                <Button
-                  variant="secondary"
-                  size="xs"
-                  onClick={() => {
-                    const updated = extractedReviewList.map(q => ({ ...q, approved: true }));
-                    setExtractedReviewList(updated);
-                  }}
-                >
-                  Approve All
-                </Button>
+                <span className="text-sm font-bold text-slate-900 dark:text-white">
+                  PDF Analysis Complete: {totalCount} Questions Detected
+                </span>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <Badge variant="success">✓ {validCount} Ready</Badge>
+                {needsAttentionCount > 0 && <Badge variant="warning">! {needsAttentionCount} Needs Attention</Badge>}
+                <span className="text-xs text-slate-400">({approvedCount} approved)</span>
               </div>
             </div>
-          )}
 
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            Each card represents exactly one MCQ. Review statements, options, and answers before saving to your Question Bank.
-          </p>
-
-          <div className="space-y-3">
-            {extractedReviewList.map((q, i) => (
-              <Card key={q.tempId} className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 space-y-3 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
-                      Question #{q.originalQuestionNumber}
-                    </span>
-                    <Badge variant={q.status === 'valid' ? 'success' : q.status === 'answer_unknown' ? 'warning' : 'danger'}>
-                      {q.status === 'valid' ? 'Valid' : q.status === 'answer_unknown' ? 'Answer Unknown' : 'Needs Review'}
-                    </Badge>
-                    <Badge variant={q.confidence === 'high' ? 'success' : q.confidence === 'medium' ? 'warning' : 'danger'}>
-                      Confidence: {q.confidence}
-                    </Badge>
-                    <span className="text-[10px] text-slate-400">
-                      Source: Page {q.sourcePageStart}{q.sourcePageEnd !== q.sourcePageStart ? `–${q.sourcePageEnd}` : ''}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    {q.rawSourceSnippet && (
-                      <button
-                        onClick={() => setViewSourceId(viewSourceId === q.tempId ? null : q.tempId)}
-                        className="text-[11px] text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 flex items-center gap-1 font-semibold"
-                      >
-                        <Eye className="w-3 h-3" /> {viewSourceId === q.tempId ? 'Hide Source' : 'View Source'}
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => {
-                        const updated = extractedReviewList.filter((_, idx) => idx !== i);
-                        setExtractedReviewList(updated);
-                      }}
-                      className="p-1 text-slate-400 hover:text-rose-500"
-                      title="Delete this question"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 font-semibold cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={q.approved}
-                        onChange={e => {
-                          const updated = [...extractedReviewList];
-                          updated[i].approved = e.target.checked;
-                          setExtractedReviewList(updated);
-                        }}
-                        className="rounded text-brand-600 focus:ring-brand-500"
-                      />
-                      <span>Approve</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* View Source Drawer */}
-                {viewSourceId === q.tempId && q.rawSourceSnippet && (
-                  <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 whitespace-pre-wrap">
-                    {q.rawSourceSnippet}
-                  </div>
-                )}
-
-                {/* Question Statement Input */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">Question Statement</label>
-                  <textarea
-                    value={q.questionText}
-                    onChange={e => {
-                      const updated = [...extractedReviewList];
-                      updated[i].questionText = e.target.value;
-                      setExtractedReviewList(updated);
-                    }}
-                    rows={2}
-                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
-                  />
-                </div>
-
-                {/* Options Inputs */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {q.options.map((opt, oIdx) => (
-                    <div key={opt.id} className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-500 w-4 text-center">{opt.id}.</span>
-                      <input
-                        type="text"
-                        value={opt.text}
-                        onChange={e => {
-                          const updated = [...extractedReviewList];
-                          updated[i].options[oIdx].text = e.target.value;
-                          setExtractedReviewList(updated);
-                        }}
-                        placeholder={`Option ${opt.id}`}
-                        className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                {/* Answer and Explanation Controls */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
-                      Detected Answer:
-                    </label>
-                    <select
-                      value={q.detectedAnswer || ''}
-                      onChange={e => {
-                        const updated = [...extractedReviewList];
-                        const val = (e.target.value as 'A' | 'B' | 'C' | 'D') || null;
-                        updated[i].detectedAnswer = val;
-                        if (val && updated[i].status === 'answer_unknown') {
-                          updated[i].status = 'valid';
-                        }
-                        setExtractedReviewList(updated);
-                      }}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-brand-600 dark:text-brand-400"
-                    >
-                      <option value="">Unknown</option>
-                      <option value="A">Option A</option>
-                      <option value="B">Option B</option>
-                      <option value="C">Option C</option>
-                      <option value="D">Option D</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
-                      Explanation (Optional):
-                    </label>
-                    <input
-                      type="text"
-                      value={q.explanation}
-                      onChange={e => {
-                        const updated = [...extractedReviewList];
-                        updated[i].explanation = e.target.value;
-                        setExtractedReviewList(updated);
-                      }}
-                      placeholder="Leave blank if not in source"
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                    />
-                  </div>
-                </div>
-              </Card>
-            ))}
+            {/* Fast Batch Action Buttons */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<Play className="w-3.5 h-3.5 fill-current" />}
+                onClick={() => handleSaveApprovedToBank(true)}
+                disabled={validCount === 0}
+              >
+                Save {validCount} & Practice
+              </Button>
+            </div>
           </div>
 
+          {/* Review Filter Bar */}
+          <div className="flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 font-semibold">Filter:</span>
+              <button
+                type="button"
+                onClick={() => setReviewFilter('all')}
+                className={`px-2.5 py-1 rounded-lg font-semibold ${
+                  reviewFilter === 'all' ? 'bg-brand-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                All ({totalCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setReviewFilter('valid')}
+                className={`px-2.5 py-1 rounded-lg font-semibold ${
+                  reviewFilter === 'valid' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                Ready ({validCount})
+              </button>
+              {needsAttentionCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setReviewFilter('needs_attention')}
+                  className={`px-2.5 py-1 rounded-lg font-semibold ${
+                    reviewFilter === 'needs_attention' ? 'bg-amber-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  Needs Attention ({needsAttentionCount})
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => {
+                  const updated = extractedReviewList.map(q => ({
+                    ...q,
+                    approved: q.confidence === 'high' && q.status === 'valid',
+                  }));
+                  setExtractedReviewList(updated);
+                }}
+              >
+                Approve High Confidence
+              </Button>
+              <Button
+                variant="secondary"
+                size="xs"
+                onClick={() => {
+                  const updated = extractedReviewList.map(q => ({ ...q, approved: true }));
+                  setExtractedReviewList(updated);
+                }}
+              >
+                Approve All
+              </Button>
+            </div>
+          </div>
+
+          {/* Questions Scroll Area */}
+          <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+            {filteredReviewList.map((q) => {
+              const realIndex = extractedReviewList.findIndex(item => item.tempId === q.tempId);
+              return (
+                <Card key={q.tempId} className="p-4 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/80 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-brand-600 dark:text-brand-400">
+                        Question #{q.originalQuestionNumber}
+                      </span>
+                      <Badge variant={q.status === 'valid' ? 'success' : q.status === 'answer_unknown' ? 'warning' : 'danger'}>
+                        {q.status === 'valid' ? 'Valid' : q.status === 'answer_unknown' ? 'Answer Unknown' : 'Needs Review'}
+                      </Badge>
+                      <span className="text-[10px] text-slate-400">
+                        Page {q.sourcePageStart}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {q.rawSourceSnippet && (
+                        <button
+                          onClick={() => setViewSourceId(viewSourceId === q.tempId ? null : q.tempId)}
+                          className="text-[11px] text-slate-500 hover:text-brand-600 dark:hover:text-brand-400 flex items-center gap-1 font-semibold"
+                        >
+                          <Eye className="w-3 h-3" /> {viewSourceId === q.tempId ? 'Hide Source' : 'View Source'}
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => {
+                          const updated = extractedReviewList.filter((_, idx) => idx !== realIndex);
+                          setExtractedReviewList(updated);
+                        }}
+                        className="p-1 text-slate-400 hover:text-rose-500"
+                        title="Delete question"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+
+                      <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 font-semibold cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={q.approved}
+                          onChange={e => {
+                            if (realIndex >= 0) {
+                              const updated = [...extractedReviewList];
+                              updated[realIndex].approved = e.target.checked;
+                              setExtractedReviewList(updated);
+                            }
+                          }}
+                          className="rounded text-brand-600 focus:ring-brand-500"
+                        />
+                        <span>Approve</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* View Source Drawer */}
+                  {viewSourceId === q.tempId && q.rawSourceSnippet && (
+                    <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-[11px] font-mono text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 whitespace-pre-wrap">
+                      {q.rawSourceSnippet}
+                    </div>
+                  )}
+
+                  {/* Question Statement Input */}
+                  <div>
+                    <textarea
+                      value={q.questionText}
+                      onChange={e => {
+                        if (realIndex >= 0) {
+                          const updated = [...extractedReviewList];
+                          updated[realIndex].questionText = e.target.value;
+                          setExtractedReviewList(updated);
+                        }
+                      }}
+                      rows={2}
+                      className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
+
+                  {/* Options Inputs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {q.options.map((opt, oIdx) => (
+                      <div key={opt.id} className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500 w-4 text-center">{opt.id}.</span>
+                        <input
+                          type="text"
+                          value={opt.text}
+                          onChange={e => {
+                            if (realIndex >= 0) {
+                              const updated = [...extractedReviewList];
+                              updated[realIndex].options[oIdx].text = e.target.value;
+                              setExtractedReviewList(updated);
+                            }
+                          }}
+                          className="w-full px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Answer and Explanation Controls */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                        Detected Answer:
+                      </label>
+                      <select
+                        value={q.detectedAnswer || ''}
+                        onChange={e => {
+                          if (realIndex >= 0) {
+                            const updated = [...extractedReviewList];
+                            const val = (e.target.value as 'A' | 'B' | 'C' | 'D') || null;
+                            updated[realIndex].detectedAnswer = val;
+                            if (val && updated[realIndex].status === 'answer_unknown') {
+                              updated[realIndex].status = 'valid';
+                            }
+                            setExtractedReviewList(updated);
+                          }
+                        }}
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-brand-600 dark:text-brand-400"
+                      >
+                        <option value="">Unknown (Unanswered in Key)</option>
+                        <option value="A">Option A</option>
+                        <option value="B">Option B</option>
+                        <option value="C">Option C</option>
+                        <option value="D">Option D</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                        Explanation (Optional):
+                      </label>
+                      <input
+                        type="text"
+                        value={q.explanation || ''}
+                        onChange={e => {
+                          if (realIndex >= 0) {
+                            const updated = [...extractedReviewList];
+                            updated[realIndex].explanation = e.target.value;
+                            setExtractedReviewList(updated);
+                          }
+                        }}
+                        placeholder="Leave blank if not in source"
+                        className="w-full px-2.5 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Sticky Bottom Action Bar */}
           <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-slate-800">
             <span className="text-xs text-slate-500 font-medium">
               Approved: {approvedCount} of {totalCount}
@@ -922,15 +1072,22 @@ export const Questions: React.FC = () => {
               </Button>
               <Button
                 variant="primary"
-                onClick={handleSaveApprovedToBank}
+                onClick={() => handleSaveApprovedToBank(false)}
                 disabled={approvedCount === 0}
               >
-                Save Approved Questions ({approvedCount})
+                Save {approvedCount} Questions to Bank
               </Button>
             </div>
           </div>
         </div>
       </Modal>
+
+      {/* AI Study Builder Modal */}
+      <AIStudyBuilderModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        initialTargetId={selectedTargetId || targets[0]?.id}
+      />
     </div>
   );
 };

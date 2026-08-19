@@ -9,36 +9,58 @@ import { Badge } from '../components/common/Badge';
 import { ResetModal } from '../components/common/ResetModal';
 import { ErrorBoundary } from '../components/common/ErrorBoundary';
 import {
-  Mail,
-  Database,
-  Download,
-  ShieldCheck,
-  RotateCcw,
+  User,
   Sun,
   Moon,
   Clock,
-  CheckCircle2,
+  Mail,
+  Sparkles,
+  ShieldCheck,
+  Database,
+  RotateCcw,
+  Download,
   Sliders,
+  CheckCircle2,
+  AlertTriangle,
+  Globe,
 } from 'lucide-react';
 import { sendDailySummaryEmail } from '../services/emailService';
 import { exportBackupData } from '../services/backupService';
 import { format, startOfDay, endOfDay } from 'date-fns';
 
+type SettingsTab =
+  | 'profile'
+  | 'appearance'
+  | 'preferences'
+  | 'email'
+  | 'ai'
+  | 'sources'
+  | 'data';
+
 export const SettingsContent: React.FC = () => {
   const { activeProfileKey, currentUser, switchUser } = useUser();
-  
+  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+
   const settings = useLiveQuery(() => db.userSettings.get(currentUser.id), [currentUser.id]);
 
-  const [emailStatus, setEmailStatus] = useState<string | null>(null);
+  // Form states
   const [recipientEmail, setRecipientEmail] = useState(currentUser.email || '');
   const [isReminder15m, setIsReminder15m] = useState(true);
   const [isDaily10pm, setIsDaily10pm] = useState(true);
   const [dailyGoalHours, setDailyGoalHours] = useState<number>(3);
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
-    return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+    return typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
   });
+
+  // AI settings
+  const [aiProvider, setAiProvider] = useState<'gemini' | 'openai' | 'builtin'>('builtin');
+  const [aiTemperature, setAiTemperature] = useState<number>(0.3);
+  const [researchTierPref, setResearchTierPref] = useState<'official_only' | 'official_and_trusted'>('official_and_trusted');
+
+  // Status banners
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
+  const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [backupStatus, setBackupStatus] = useState<string | null>(null);
-  const [resetMessage, setResetMessage] = useState<string | null>(null);
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
   useEffect(() => {
@@ -62,18 +84,18 @@ export const SettingsContent: React.FC = () => {
     }
   };
 
-  const handleSaveSettings = async () => {
+  const handleSavePreferences = async () => {
     await updateUserSettings(currentUser.id, {
       recipientEmail,
       reminder15minEnabled: isReminder15m,
       dailySummary10pmEnabled: isDaily10pm,
     });
-    setEmailStatus('Preferences saved successfully.');
-    setTimeout(() => setEmailStatus(null), 3000);
+    setSaveStatus('Settings successfully saved and persisted.');
+    setTimeout(() => setSaveStatus(null), 3500);
   };
 
   const handleTest10pmSummary = async () => {
-    setEmailStatus('Generating study statistics and dispatching 10 PM Daily Summary...');
+    setEmailStatus('Generating study statistics and dispatching 10:00 PM Daily Summary...');
 
     const todayStart = startOfDay(new Date()).getTime();
     const todayEnd = endOfDay(new Date()).getTime();
@@ -89,47 +111,35 @@ export const SettingsContent: React.FC = () => {
       .and(a => a.timestamp >= todayStart && a.timestamp <= todayEnd)
       .toArray();
 
-    const targetBreakdowns = targets.map(t => {
-      const studied = sessions.filter(s => s.targetId === t.id).reduce((sum, s) => sum + s.focusedMinutes, 0);
-      return {
-        targetName: t.name,
-        studiedMinutes: studied,
-        plannedMinutes: t.dailyGoalMinutes,
-        isCompleted: studied >= t.dailyGoalMinutes,
-      };
-    });
-
     const totalStudy = sessions.reduce((sum, s) => sum + s.focusedMinutes, 0);
-    const totalGoal = targets.reduce((sum, t) => sum + t.dailyGoalMinutes, 0) || 1;
+    const totalGoal = targets.reduce((sum, t) => sum + t.dailyGoalMinutes, 0) || 120;
     const goalPct = Math.min(100, Math.round((totalStudy / totalGoal) * 100));
 
     const attempted = attempts.length;
     const correct = attempts.filter(a => a.isCorrect).length;
     const wrong = attempted - correct;
-    const accuracy = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    const accuracy = attempted > 0 ? Math.round((correct / attempted) * 100) : null;
 
-    const status: 'On Track' | 'Almost There' | 'Needs Attention' =
-      goalPct >= 80 ? 'On Track' : goalPct >= 50 ? 'Almost There' : 'Needs Attention';
+    const targetBreakdown: Record<string, number> = {};
+    targets.forEach(t => {
+      targetBreakdown[t.name] = sessions.filter(s => s.targetId === t.id).reduce((sum, s) => sum + s.focusedMinutes, 0);
+    });
 
     const result = await sendDailySummaryEmail({
       userId: currentUser.id,
       userName: currentUser.name,
       recipientEmail,
-      dateStr: format(new Date(), 'yyyy-MM-dd'),
-      totalStudyMinutes: totalStudy,
-      targetBreakdowns,
-      mcqStats: {
-        attempted,
-        correct,
-        wrong,
-        accuracy,
-      },
-      dailyGoalCompletionPercent: goalPct,
-      status,
-      statusExplanation: `${totalStudy}m studied today, ${goalPct}% of daily target reached.`,
+      todayFocusMinutes: totalStudy,
+      dailyGoalMinutes: totalGoal,
+      goalCompletionPct: goalPct,
+      mcqsAttempted: attempted,
+      mcqsCorrect: correct,
+      mcqsWrong: wrong,
+      accuracyPct: accuracy,
+      targetBreakdown,
     });
 
-    setEmailStatus(`Daily Summary dispatched: "${result.subject}"`);
+    setEmailStatus(`Daily Summary dispatched: "${result.message}"`);
     setTimeout(() => setEmailStatus(null), 5000);
   };
 
@@ -139,276 +149,382 @@ export const SettingsContent: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `StudyDashboard-Backup-${currentUser.name}-${format(new Date(), 'yyyy-MM-dd')}.json`;
+    a.download = `studydashboard-backup-${currentUser.id}-${format(new Date(), 'yyyy-MM-dd')}.json`;
     a.click();
-    URL.revokeObjectURL(url);
     setBackupStatus('Backup exported successfully.');
-    setTimeout(() => setBackupStatus(null), 3000);
+    setTimeout(() => setBackupStatus(null), 4000);
   };
 
+  const tabs: Array<{ id: SettingsTab; label: string; icon: React.FC<{ className?: string }> }> = [
+    { id: 'profile', label: 'Profile', icon: User },
+    { id: 'appearance', label: 'Appearance', icon: Sun },
+    { id: 'preferences', label: 'Study Preferences', icon: Sliders },
+    { id: 'email', label: 'Email & Reminders', icon: Mail },
+    { id: 'ai', label: 'AI Settings', icon: Sparkles },
+    { id: 'sources', label: 'Trusted Sources', icon: ShieldCheck },
+    { id: 'data', label: 'Data & Progress', icon: Database },
+  ];
+
   return (
-    <div className="max-w-4xl space-y-6 pb-12 animate-fade-in">
+    <div className="max-w-5xl mx-auto space-y-6 pb-16 animate-fade-in">
       <div>
         <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Settings & Preferences</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Manage profile, timezone, themes, automated email reminders, and study progress.
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+          Configure profile, email reminders, AI models, and trusted sources for Asia/Kathmandu timezone.
         </p>
       </div>
 
-      {resetMessage && (
-        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2 animate-fade-in">
+      {saveStatus && (
+        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4" />
-          <span>{resetMessage}</span>
+          <span>{saveStatus}</span>
         </div>
       )}
 
-      {/* 1. Active Profile Section */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-          <span>Profile & Active User</span>
-        </h3>
+      {/* Tabs Navigation */}
+      <div className="flex overflow-x-auto gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+        {tabs.map(tab => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                isActive
+                  ? 'bg-brand-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-3">
+      {/* ================= TAB 1: PROFILE ================= */}
+      {activeTab === 'profile' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Active User Profile</h3>
+          <div className="flex items-center gap-4">
             <img
               src={currentUser.avatarUrl}
               alt={currentUser.name}
-              className="w-12 h-12 rounded-full border-2 border-brand-500 bg-slate-100 dark:bg-slate-800"
+              className="w-16 h-16 rounded-full border border-slate-300 dark:border-slate-700 shadow-xs"
             />
             <div>
-              <p className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{currentUser.email}</p>
-              <Badge variant="brand" className="mt-1">Active Study Profile</Badge>
+              <h4 className="text-base font-bold text-slate-900 dark:text-white">{currentUser.name}</h4>
+              <p className="text-xs text-slate-500">{currentUser.email}</p>
+              <Badge variant="brand" className="mt-1.5">
+                Profile: {activeProfileKey === 'siddhartha' ? 'Siddhartha (RBB/NRB)' : 'Shilpa (Medical/General)'}
+              </Badge>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
             <Button
-              variant={activeProfileKey === 'siddhartha' ? 'primary' : 'outline'}
+              variant="outline"
               size="sm"
-              onClick={() => switchUser('siddhartha')}
+              onClick={() => switchUser(activeProfileKey === 'siddhartha' ? 'shilpa' : 'siddhartha')}
             >
-              Siddhartha View
-            </Button>
-            <Button
-              variant={activeProfileKey === 'shilpa' ? 'primary' : 'outline'}
-              size="sm"
-              onClick={() => switchUser('shilpa')}
-            >
-              Shilpa View
+              Switch to {activeProfileKey === 'siddhartha' ? 'Shilpa' : 'Siddhartha'}
             </Button>
           </div>
-        </div>
-      </Card>
+        </Card>
+      )}
 
-      {/* 2. Study Preferences & Timezone */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <Sliders className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-          <span>Study Preferences</span>
-        </h3>
+      {/* ================= TAB 2: APPEARANCE ================= */}
+      {activeTab === 'appearance' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Color Theme</h3>
+          <p className="text-xs text-slate-500">Choose between clean Light Slate or Midnight Dark mode.</p>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-              Timezone (Real Calendar Rollover)
-            </label>
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white">
-              <Clock className="w-4 h-4 text-brand-600 dark:text-brand-400" />
-              <span>Asia/Kathmandu (UTC+5:45)</span>
+          <div className="flex items-center gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => handleThemeChange('light')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
+                themeMode === 'light'
+                  ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
+                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Sun className="w-4 h-4 text-amber-500" />
+              <span>Light Mode (Clean Slate)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleThemeChange('dark')}
+              className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-xs font-semibold transition-all ${
+                themeMode === 'dark'
+                  ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
+                  : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              <Moon className="w-4 h-4 text-indigo-400" />
+              <span>Dark Mode (Midnight Slate)</span>
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* ================= TAB 3: STUDY PREFERENCES ================= */}
+      {activeTab === 'preferences' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">Study Preferences & Timezone</h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Calendar Timezone (Asia/Kathmandu)
+              </label>
+              <div className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white">
+                <Clock className="w-4 h-4 text-brand-600" />
+                <span>Asia/Kathmandu (UTC+5:45)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1">Midnight rollover strictly calculates Nepal calendar days.</p>
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">Daily progress rolls over at 00:00 Nepal Time.</p>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Default Daily Goal
+              </label>
+              <select
+                value={dailyGoalHours}
+                onChange={e => setDailyGoalHours(Number(e.target.value))}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+              >
+                <option value={2}>2 Hours / day</option>
+                <option value={3}>3 Hours / day</option>
+                <option value={4}>4 Hours / day</option>
+                <option value={5}>5 Hours / day</option>
+                <option value={6}>6 Hours / day</option>
+              </select>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-              Default Daily Goal
-            </label>
-            <select
-              value={dailyGoalHours}
-              onChange={e => setDailyGoalHours(Number(e.target.value))}
-              className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white font-medium"
-            >
-              <option value={2}>2 Hours / day</option>
-              <option value={3}>3 Hours / day</option>
-              <option value={4}>4 Hours / day</option>
-              <option value={5}>5 Hours / day</option>
-              <option value={6}>6 Hours / day</option>
-            </select>
-          </div>
-        </div>
-      </Card>
-
-      {/* 3. Appearance (Light / Dark Theme) */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <Sun className="w-4 h-4 text-amber-500" />
-          <span>Appearance & Color Theme</span>
-        </h3>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => handleThemeChange('light')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-              themeMode === 'light'
-                ? 'bg-brand-50 border-brand-500 text-brand-700 dark:bg-brand-950 dark:text-brand-300 ring-1 ring-brand-500'
-                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Sun className="w-4 h-4 text-amber-500" />
-            <span>Light Mode (Clean Slate)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handleThemeChange('dark')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition-all ${
-              themeMode === 'dark'
-                ? 'bg-slate-800 border-brand-500 text-white ring-1 ring-brand-500'
-                : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400'
-            }`}
-          >
-            <Moon className="w-4 h-4 text-indigo-400" />
-            <span>Dark Mode (Midnight Slate)</span>
-          </button>
-        </div>
-      </Card>
-
-      {/* 4. Data & Progress (Reset All Study Progress) */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <RotateCcw className="w-4 h-4 text-rose-500" />
-          <span>Data & Progress: Reset All Study Progress</span>
-        </h3>
-
-        <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-          This will permanently remove your study sessions, MCQ attempts, progress statistics and streak history. Your Targets, Subjects, Questions, Materials and Settings will remain.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3 pt-2">
-          <Button
-            variant="danger"
-            size="sm"
-            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-            onClick={() => setIsResetModalOpen(true)}
-          >
-            Reset Progress / Streak
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-rose-500/50 text-rose-500 hover:bg-rose-500/10"
-            leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
-            onClick={async () => {
-              if (window.confirm("Wipe ALL study history, streaks, and attempts for BOTH Siddhartha & Shilpa back to 0?")) {
-                await resetAllProgressToZero('all');
-                localStorage.setItem('studydashboard_is_reset_v5', 'true');
-                window.location.reload();
-              }
-            }}
-          >
-            Instant Wipe Both to Day 0
-          </Button>
-        </div>
-      </Card>
-
-      {/* 5. Automated Email Reminders & 10 PM Summary Settings */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Mail className="w-4 h-4 text-blue-500" />
-              <span>Automated Email Reminders & Daily Summary</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>
-          </div>
-        </div>
-
-        {emailStatus && (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-            {emailStatus}
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Recipient Email Address</label>
-            <input
-              type="email"
-              value={recipientEmail}
-              onChange={e => setRecipientEmail(e.target.value)}
-              className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-            />
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isReminder15m}
-                onChange={e => setIsReminder15m(e.target.checked)}
-                className="rounded text-brand-600 focus:ring-brand-500"
-              />
-              <span>Send 15-minute advance reminder before scheduled study sessions</span>
-            </label>
-
-            <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={isDaily10pm}
-                onChange={e => setIsDaily10pm(e.target.checked)}
-                className="rounded text-brand-600 focus:ring-brand-500"
-              />
-              <span>Send 10:00 PM Asia/Kathmandu Daily Summary Email</span>
-            </label>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
-            <Button variant="primary" size="sm" onClick={handleSaveSettings}>
-              Save Email Preferences
-            </Button>
-            <Button variant="outline" size="sm" leftIcon={<Mail className="w-3.5 h-3.5" />} onClick={handleTest10pmSummary}>
-              Send Test 10 PM Daily Summary Now
+          <div className="pt-3 border-t border-slate-200 dark:border-slate-800">
+            <Button variant="primary" size="sm" onClick={handleSavePreferences}>
+              Save Preferences
             </Button>
           </div>
-        </div>
-      </Card>
+        </Card>
+      )}
 
-      {/* 6. Local Backup & Export */}
-      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-          <Database className="w-4 h-4 text-blue-500" />
-          <span>Local Backup & Export</span>
-        </h3>
-
-        {backupStatus && (
-          <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
-            {backupStatus}
+      {/* ================= TAB 4: EMAIL & REMINDERS ================= */}
+      {activeTab === 'email' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Mail className="w-4 h-4 text-blue-500" />
+                <span>Automated Email Reminders & Nightly Summary</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">Scheduled in timezone: <strong>Asia/Kathmandu (UTC+5:45)</strong></p>
+            </div>
           </div>
-        )}
 
-        <div className="flex items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={<Download className="w-4 h-4" />}
-            onClick={handleExportBackup}
-          >
-            Export Full JSON Backup
-          </Button>
-        </div>
-      </Card>
+          {emailStatus && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+              {emailStatus}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Recipient Email Address
+              </label>
+              <input
+                type="email"
+                value={recipientEmail}
+                onChange={e => setRecipientEmail(e.target.value)}
+                className="w-full sm:w-80 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div className="space-y-2.5 pt-1">
+              <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isReminder15m}
+                  onChange={e => setIsReminder15m(e.target.checked)}
+                  className="rounded text-brand-600 focus:ring-brand-500"
+                />
+                <span>Enable 15-minute advance reminder before scheduled study sessions</span>
+              </label>
+
+              <label className="flex items-center gap-3 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isDaily10pm}
+                  onChange={e => setIsDaily10pm(e.target.checked)}
+                  className="rounded text-brand-600 focus:ring-brand-500"
+                />
+                <span>Enable 10:00 PM Asia/Kathmandu Daily Summary Email (with 7-day focus chart)</span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <Button variant="primary" size="sm" onClick={handleSavePreferences}>
+                Save Email Preferences
+              </Button>
+              <Button variant="outline" size="sm" leftIcon={<Mail className="w-3.5 h-3.5" />} onClick={handleTest10pmSummary}>
+                Send Test 10 PM Summary
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* ================= TAB 5: AI SETTINGS ================= */}
+      {activeTab === 'ai' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>AI Model & Generation Configuration</span>
+          </h3>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                AI Provider Engine
+              </label>
+              <select
+                value={aiProvider}
+                onChange={e => setAiProvider(e.target.value as any)}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+              >
+                <option value="builtin">Curriculum Grounded Engine (Standard / Secure)</option>
+                <option value="gemini">Google Gemini AI Model (Server Configured)</option>
+                <option value="openai">OpenAI ChatGPT Model (Server Configured)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Default Research Tier
+              </label>
+              <select
+                value={researchTierPref}
+                onChange={e => setResearchTierPref(e.target.value as any)}
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white"
+              >
+                <option value="official_and_trusted">Official + Trusted Secondary Sources</option>
+                <option value="official_only">Official Sources Only (Tier 1 Strict)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-500">
+            <strong>Security Notice:</strong> All AI calls and API credentials are kept strictly server-side in your environment configuration and are never exposed in browser clients.
+          </div>
+
+          <div className="pt-2">
+            <Button variant="primary" size="sm" onClick={handleSavePreferences}>
+              Save AI Settings
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ================= TAB 6: TRUSTED SOURCES ================= */}
+      {activeTab === 'sources' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-4">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Trusted Research Hierarchy & Whitelisted Domains</span>
+          </h3>
+
+          <div className="space-y-3 pt-1">
+            <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 space-y-1">
+              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase">Tier 1 — Official Nepal Government / Institutional</span>
+              <p className="text-xs text-slate-700 dark:text-slate-300">
+                • <code>psc.gov.np</code> (Public Service Commission Examination Directives)<br />
+                • <code>nrb.org.np</code> (Nepal Rastra Bank Acts & Circulars)<br />
+                • <code>rbb.com.np</code> (Rastriya Banijya Bank Recruitment Standards)<br />
+                • <code>lawcommission.gov.np</code> (Nepal Law Commission Statutes)
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/5 space-y-1">
+              <span className="text-xs font-bold text-blue-700 dark:text-blue-400 uppercase">Tier 2 — User Verified Documents</span>
+              <p className="text-xs text-slate-700 dark:text-slate-300">
+                • Uploaded syllabus PDFs<br />
+                • Uploaded old question papers<br />
+                • Verified Question Bank records
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/5 space-y-1">
+              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase">Tier 3 — Trusted Secondary</span>
+              <p className="text-xs text-slate-700 dark:text-slate-300">
+                • Peer-reviewed reference textbooks and standard curriculum used only when Tier 1 evidence is insufficient.
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* ================= TAB 7: DATA & PROGRESS ================= */}
+      {activeTab === 'data' && (
+        <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs space-y-5">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <Database className="w-4 h-4 text-blue-500" />
+            <span>Data Management & Study Reset</span>
+          </h3>
+
+          {backupStatus && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs font-semibold">
+              {backupStatus}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                Backup & Export
+              </h4>
+              <p className="text-xs text-slate-500 mb-2">Export your study history, questions, and targets to a JSON backup.</p>
+              <Button
+                variant="outline"
+                size="sm"
+                leftIcon={<Download className="w-4 h-4" />}
+                onClick={handleExportBackup}
+              >
+                Export JSON Backup
+              </Button>
+            </div>
+
+            <div className="pt-4 border-t border-slate-200 dark:border-slate-800">
+              <h4 className="text-xs font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider mb-1">
+                Reset Study Progress (Fresh Start)
+              </h4>
+              <p className="text-xs text-slate-500 mb-3">
+                Permanently wipes study sessions, streaks, and MCQ attempts back to Day 0. Your targets, subjects, and questions remain intact.
+              </p>
+              <Button
+                variant="danger"
+                size="sm"
+                leftIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                onClick={() => setIsResetModalOpen(true)}
+              >
+                Reset Progress / Streak
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* 2-Step Verification Reset Modal */}
       <ResetModal
         isOpen={isResetModalOpen}
         onClose={() => setIsResetModalOpen(false)}
         onSuccess={(msg) => {
-          setResetMessage(msg);
-          setTimeout(() => setResetMessage(null), 5000);
+          setSaveStatus(msg);
+          setTimeout(() => setSaveStatus(null), 5000);
         }}
       />
     </div>

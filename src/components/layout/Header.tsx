@@ -72,10 +72,10 @@ export const Header: React.FC<HeaderProps> = ({ currentPage, studyStreak = 1 }) 
           <Timer className="w-4 h-4" />
           <span>
             {isRunning
-              ? `● ${activeTargetName || 'Studying'}: ${formattedTime}`
+              ? `● ${activeTargetName || 'Focus'}: ${formattedTime}`
               : isPaused
               ? `❚❚ ${activeTargetName || 'Paused'}: ${formattedTime}`
-              : 'Start Study'}
+              : 'Focus Now'}
           </span>
         </button>
 

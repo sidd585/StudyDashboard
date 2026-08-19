@@ -167,3 +167,78 @@ async def import_mcqs(
     )
 
     return response
+
+# ==================== AI Study Builder Endpoints ====================
+
+from .ai_service import (
+    ResearchRequest, ResearchResponse, research_syllabus_and_topics,
+    BlueprintRequest, BlueprintResponse, create_practice_blueprint,
+    GenerateQuestionsRequest, GenerateQuestionsResponse, generate_ai_mcqs
+)
+
+@app.post("/api/ai/research", response_model=ResearchResponse)
+async def api_ai_research(req: ResearchRequest):
+    """Analyze target syllabus and return verified topics and sources."""
+    try:
+        return await research_syllabus_and_topics(req)
+    except Exception as e:
+        logger.error(f"AI research failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"AI research failed: {str(e)}")
+
+@app.post("/api/ai/blueprint", response_model=BlueprintResponse)
+def api_ai_blueprint(req: BlueprintRequest):
+    """Generate structured practice blueprint with balanced topic and difficulty splits."""
+    try:
+        return create_practice_blueprint(req)
+    except Exception as e:
+        logger.error(f"AI blueprint failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"AI blueprint failed: {str(e)}")
+
+# ==================== Email Reporting Endpoints ====================
+
+from .email_service import (
+    DailySummaryEmailRequest, PreStudyReminderRequest, EmailSendResponse,
+    build_daily_summary_html, send_resend_email
+)
+
+@app.post("/api/email/daily-summary", response_model=EmailSendResponse)
+async def api_email_daily_summary(req: DailySummaryEmailRequest):
+    """Generate nightly study summary email with 7-day server chart."""
+    try:
+        html = build_daily_summary_html(req)
+        subject = f"StudyDashboard Daily Summary — {req.userName} ({req.todayFocusMinutes}m focused)"
+        success, email_id = await send_resend_email(req.recipientEmail, subject, html)
+        return EmailSendResponse(
+            success=success,
+            message="Nightly study summary generated successfully",
+            emailId=email_id,
+            previewHtml=html
+        )
+    except Exception as e:
+        logger.error(f"Daily summary email error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate daily summary: {str(e)}")
+
+@app.post("/api/email/pre-study-reminder", response_model=EmailSendResponse)
+async def api_email_pre_study_reminder(req: PreStudyReminderRequest):
+    """Send 15-minute pre-study reminder email."""
+    try:
+        html = f"""
+        <div style="font-family: sans-serif; padding: 20px; background: #f8fafc; border-radius: 12px;">
+            <h2 style="color: #6366f1;">Upcoming Study Session in 15 Minutes</h2>
+            <p>Hi <strong>{req.userName}</strong>,</p>
+            <p>Your study session for <strong>{req.targetName}</strong> is scheduled to begin at <strong>{req.plannedStartTime}</strong> ({req.plannedDurationMinutes} minutes).</p>
+            <p>Today's progress: {req.todayCompletedMinutes}m / {req.todayTargetMinutes}m completed.</p>
+        </div>
+        """
+        subject = f"Upcoming Study Session: {req.targetName} at {req.plannedStartTime}"
+        success, email_id = await send_resend_email(req.recipientEmail, subject, html)
+        return EmailSendResponse(
+            success=success,
+            message="Pre-study reminder dispatched successfully",
+            emailId=email_id,
+            previewHtml=html
+        )
+    except Exception as e:
+        logger.error(f"Pre-study reminder email error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch reminder: {str(e)}")
+

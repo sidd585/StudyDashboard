@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../../db';
 import { useUser } from '../../context/UserContext';
@@ -10,15 +10,18 @@ import {
   Pause,
   Square,
   Star,
-  BookOpen,
   Clock,
   Sparkles,
   AlertCircle,
-  X,
+  BookOpen,
 } from 'lucide-react';
 import type { StudyActivityType } from '../../types';
 
-export const StudyTimerModal: React.FC = () => {
+interface StudyTimerModalProps {
+  onNavigatePractice?: (targetId: string) => void;
+}
+
+export const StudyTimerModal: React.FC<StudyTimerModalProps> = ({ onNavigatePractice }) => {
   const { currentUser } = useUser();
   const {
     activeSession,
@@ -36,7 +39,7 @@ export const StudyTimerModal: React.FC = () => {
     closeModal,
   } = useStudyTimer();
 
-  // User-specific targets and subjects
+  // User targets
   const targets = useLiveQuery(
     () => db.targets.where('userId').equals(currentUser.id).and(t => !t.isArchived).toArray(),
     [currentUser.id]
@@ -44,9 +47,10 @@ export const StudyTimerModal: React.FC = () => {
 
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('');
+  const [selectedTopicId, setSelectedTopicId] = useState<string>('');
   const [activityType, setActivityType] = useState<StudyActivityType>('Reading');
 
-  // Finish session confirmation state
+  // Finish session state
   const [isFinishing, setIsFinishing] = useState<boolean>(false);
   const [focusRating, setFocusRating] = useState<number>(4);
   const [completionNotes, setCompletionNotes] = useState<string>('');
@@ -57,8 +61,13 @@ export const StudyTimerModal: React.FC = () => {
     [selectedTargetId]
   ) || [];
 
+  const topics = useLiveQuery(
+    () => (selectedSubjectId ? db.topics.where('subjectId').equals(selectedSubjectId).toArray() : []),
+    [selectedSubjectId]
+  ) || [];
+
   // Default target selection
-  React.useEffect(() => {
+  useEffect(() => {
     if (!selectedTargetId && targets.length > 0) {
       setSelectedTargetId(targets[0].id);
     }
@@ -74,13 +83,17 @@ export const StudyTimerModal: React.FC = () => {
     setIsFinishing(true);
   };
 
-  const handleConfirmSave = async () => {
+  const handleConfirmSave = async (andPractice: boolean = false) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    const targetToPractice = activeTargetId || selectedTargetId;
     try {
       await stopTimer(focusRating, completionNotes);
       setIsFinishing(false);
       setCompletionNotes('');
+      if (andPractice && onNavigatePractice && targetToPractice) {
+        onNavigatePractice(targetToPractice);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -102,36 +115,35 @@ export const StudyTimerModal: React.FC = () => {
       onClose={closeModal}
       title={
         isFinishing
-          ? 'Finish Study Session'
+          ? 'Finish Focus Session'
           : hasActiveSession
-          ? `Studying ${activeTargetName || 'Target'}`
-          : 'Start Focused Study'
+          ? `Focus Session: ${activeTargetName || 'Target'}`
+          : 'Start Focus Session'
       }
       size="md"
     >
       <div className="space-y-6">
-        {/* CASE 1: Finishing Confirmation & Review Screen */}
+        {/* CASE 1: Finishing Celebration & Review Screen */}
         {isFinishing ? (
           <div className="space-y-5 animate-fade-in">
-            <div className="p-4 bg-slate-50 dark:bg-slate-900/80 rounded-2xl border border-slate-200 dark:border-slate-800 text-center space-y-1">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Finish this study session?
-              </span>
-              <p className="text-base font-bold text-slate-900 dark:text-white">
-                {activeTargetName}
+            <div className="p-4 bg-gradient-to-r from-emerald-500/10 via-brand-500/10 to-slate-900 rounded-2xl border border-emerald-500/30 text-center space-y-1">
+              <span className="text-xl">🎉</span>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                Great work! Session Completed.
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                You focused on <strong className="text-slate-900 dark:text-white">{activeTargetName}</strong> for{' '}
+                <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{formattedTime}</strong>
               </p>
-              <div className="flex items-center justify-center gap-4 text-xs text-slate-500 pt-1">
-                <span>Started: {startTimeDisplay}</span>
-                <span>•</span>
-                <span className="font-mono font-bold text-brand-600 dark:text-brand-400">
-                  Total Time: {formattedTime}
-                </span>
+              <div className="text-[11px] text-slate-400 pt-1">
+                Started at {startTimeDisplay}
               </div>
             </div>
 
+            {/* Focus Rating */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                How focused were you? (1–5)
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2 text-center">
+                How focused were you? (1–5 Stars)
               </label>
               <div className="flex items-center justify-center gap-2 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800">
                 {[1, 2, 3, 4, 5].map(rating => (
@@ -151,39 +163,53 @@ export const StudyTimerModal: React.FC = () => {
               </div>
             </div>
 
+            {/* Optional Notes */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                What did you complete? (Optional)
+                What did you complete? (Optional Notes)
               </label>
               <textarea
                 value={completionNotes}
                 onChange={e => setCompletionNotes(e.target.value)}
-                placeholder="e.g. Solved 20 networking questions, reviewed BAFIA Act..."
+                placeholder="e.g. Completed Chapter 4, reviewed 25 past questions..."
                 rows={2}
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
               />
             </div>
 
-            <div className="flex gap-3 pt-2">
-              <Button
-                variant="outline"
-                className="flex-1"
-                disabled={isSubmitting}
-                onClick={() => {
-                  setIsFinishing(false);
-                  resumeTimer();
-                }}
-              >
-                Resume Timer
-              </Button>
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-2">
               <Button
                 variant="primary"
-                className="flex-1"
+                className="w-full"
                 disabled={isSubmitting}
-                onClick={handleConfirmSave}
+                leftIcon={<BookOpen className="w-4 h-4" />}
+                onClick={() => handleConfirmSave(true)}
               >
-                {isSubmitting ? 'Saving Session...' : 'Finish & Save'}
+                {isSubmitting ? 'Saving...' : 'Practice This Topic Now'}
               </Button>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setIsFinishing(false);
+                    resumeTimer();
+                  }}
+                >
+                  Resume Timer
+                </Button>
+                <Button
+                  variant="secondary"
+                  className="flex-1"
+                  disabled={isSubmitting}
+                  onClick={() => handleConfirmSave(false)}
+                >
+                  Finish & Save
+                </Button>
+              </div>
             </div>
           </div>
         ) : hasActiveSession ? (
@@ -192,7 +218,7 @@ export const StudyTimerModal: React.FC = () => {
             {isLongSession && (
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>This session has been running for over 6 hours. You can finish or resume below.</span>
+                <span>This session has been active for over 6 hours.</span>
               </div>
             )}
 
@@ -247,23 +273,28 @@ export const StudyTimerModal: React.FC = () => {
 
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
               <p className="text-[11px] text-slate-400">
-                You can close (✕) this popup and study in another tab. The timer will continue running in the header.
+                You can close (✕) this popup and study freely. The timer continues running in the header.
               </p>
             </div>
           </div>
         ) : (
-          /* CASE 3: Configure and Start Screen */
+          /* CASE 3: Start Focus Session Configuration */
           <div className="space-y-4 animate-fade-in">
+            {/* 1. Target Selector */}
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
-                Select Target
+                1. Select Target
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {targets.map(target => (
                   <button
                     key={target.id}
                     type="button"
-                    onClick={() => setSelectedTargetId(target.id)}
+                    onClick={() => {
+                      setSelectedTargetId(target.id);
+                      setSelectedSubjectId('');
+                      setSelectedTopicId('');
+                    }}
                     className={`p-3 rounded-xl border text-left transition-all ${
                       selectedTargetId === target.id
                         ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-slate-900 dark:text-white ring-1 ring-brand-500'
@@ -277,30 +308,55 @@ export const StudyTimerModal: React.FC = () => {
               </div>
             </div>
 
+            {/* 2. Subject & Topic Selection */}
             {subjects.length > 0 && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
-                  Subject (Optional)
-                </label>
-                <select
-                  value={selectedSubjectId}
-                  onChange={e => setSelectedSubjectId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
-                >
-                  <option value="">All Subjects / General Study</option>
-                  {subjects.map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Subject (Optional)
+                  </label>
+                  <select
+                    value={selectedSubjectId}
+                    onChange={e => {
+                      setSelectedSubjectId(e.target.value);
+                      setSelectedTopicId('');
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                  >
+                    <option value="">All Subjects</option>
+                    {subjects.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {topics.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Topic (Optional)
+                    </label>
+                    <select
+                      value={selectedTopicId}
+                      onChange={e => setSelectedTopicId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                    >
+                      <option value="">All Topics</option>
+                      {topics.map(tp => (
+                        <option key={tp.id} value={tp.id}>{tp.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 
+            {/* 3. Activity Type */}
             <div>
               <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
                 Activity Type
               </label>
               <div className="grid grid-cols-3 gap-2">
-                {(['Reading', 'Practice', 'Revision'] as StudyActivityType[]).map(act => (
+                {(['Reading', 'MCQ Practice', 'Revision'] as StudyActivityType[]).map(act => (
                   <button
                     key={act}
                     type="button"
@@ -326,7 +382,7 @@ export const StudyTimerModal: React.FC = () => {
                 disabled={!selectedTargetId}
                 onClick={handleStart}
               >
-                Start Study Session
+                Start Focus Session
               </Button>
             </div>
           </div>

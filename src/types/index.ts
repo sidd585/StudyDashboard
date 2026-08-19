@@ -67,6 +67,13 @@ export interface DailyAllocation {
   createdAt: number;
 }
 
+export type QuestionOrigin =
+  | 'IMPORTED_OLD_QUESTION'
+  | 'USER_CREATED'
+  | 'AI_GENERATED'
+  | 'AI_PAST_PATTERN'
+  | 'SHARED';
+
 export interface Question {
   id: string;
   userId: string;
@@ -80,6 +87,7 @@ export interface Question {
   source?: string;
   year?: number | null;
   difficulty: Difficulty;
+  origin?: QuestionOrigin;
   isShared: boolean; // Shared with Study Together partner
   isBookmarked: boolean;
   isDifficult: boolean;
@@ -87,6 +95,73 @@ export interface Question {
   createdAt: number;
   updatedAt: number;
   stats: QuestionStats;
+}
+
+export interface AIResearchTopic {
+  topic: string;
+  weight: 'High' | 'Medium' | 'Low';
+  subtopics?: string[];
+  observedFrequency?: string;
+}
+
+export interface AIResearchSourceItem {
+  tier: 'Tier 1 - Official' | 'Tier 2 - User Verified' | 'Tier 3 - Secondary';
+  domain: string;
+  description: string;
+}
+
+export interface AIResearchSummary {
+  officialSyllabusFound: boolean;
+  documentsAnalyzed: number;
+  officialSourcesCount: number;
+  secondarySourcesCount: number;
+  hasHistoricalEvidence?: boolean;
+  evidenceMessage?: string | null;
+  sources: string[];
+  tierSources?: AIResearchSourceItem[];
+  observedTopics: AIResearchTopic[];
+  notes?: string;
+}
+
+export interface AIPracticeBlueprint {
+  title: string;
+  targetId: string;
+  targetName: string;
+  topic: string;
+  totalQuestions: number;
+  topicDistribution: Record<string, number>;
+  difficultyDistribution: {
+    easy: number;
+    moderate: number;
+    hard: number;
+  };
+  styleDistribution: {
+    directConcept: number;
+    comparison: number;
+    scenario: number;
+    problemSolving: number;
+    pastPattern: number;
+  };
+}
+
+export interface AIGeneratedQuestionCandidate {
+  tempId: string;
+  number: number;
+  question: string;
+  options: {
+    A: string;
+    B: string;
+    C: string;
+    D: string;
+  };
+  correctAnswer: 'A' | 'B' | 'C' | 'D';
+  explanation: string;
+  topic: string;
+  difficulty: Difficulty;
+  origin: QuestionOrigin;
+  status: 'VALIDATED' | 'NEEDS_REVIEW' | 'REJECTED';
+  issues: string[];
+  approved: boolean;
 }
 
 export interface QuizConfig {

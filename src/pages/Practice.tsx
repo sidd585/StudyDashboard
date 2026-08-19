@@ -14,8 +14,11 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
+  FileText,
+  Upload,
 } from 'lucide-react';
-import type { QuizConfig } from '../types';
+import { AIStudyBuilderModal } from '../components/ai/AIStudyBuilderModal';
+import type { QuizConfig, QuestionOrigin } from '../types';
 
 interface PracticeProps {
   onStartSession: (sessionId: string) => void;
@@ -23,7 +26,7 @@ interface PracticeProps {
   initialTargetId?: string;
 }
 
-export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTargetId }) => {
+export const Practice: React.FC<PracticeProps> = ({ onStartSession, onNavigate, initialTargetId }) => {
   const { currentUser } = useUser();
 
   const targets = useLiveQuery(
@@ -37,7 +40,8 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
   const [questionCount, setQuestionCount] = useState<number>(15);
   const [isTimed, setIsTimed] = useState<boolean>(false);
   const [timeMinutes, setTimeMinutes] = useState<number>(15);
-  const [mode, setMode] = useState<'all' | 'wrong_only' | 'unseen'>('all');
+  const [mode, setMode] = useState<'all' | 'weak_topics' | 'old_questions' | 'ai_pattern' | 'wrong_only'>('all');
+  const [isAIModalOpen, setIsAIModalOpen] = useState<boolean>(false);
 
   // Default target selection
   React.useEffect(() => {
@@ -72,6 +76,16 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
       }
       if (mode === 'wrong_only') {
         pool = pool.filter(item => item.stats.wrongAttempts > 0);
+      } else if (mode === 'weak_topics') {
+        pool = pool.filter(item => {
+          const total = item.stats.totalAttempts || 0;
+          const correct = item.stats.correctAttempts || 0;
+          return total === 0 || (correct / total) < 0.65;
+        });
+      } else if (mode === 'old_questions') {
+        pool = pool.filter(item => item.origin === 'IMPORTED_OLD_QUESTION');
+      } else if (mode === 'ai_pattern') {
+        pool = pool.filter(item => item.origin === 'AI_PAST_PATTERN' || item.origin === 'AI_GENERATED');
       }
       return pool;
     },
@@ -124,16 +138,42 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
 
   return (
     <div className="max-w-3xl mx-auto space-y-6 pb-12 animate-fade-in">
-      <div className="text-center space-y-1">
-        <h2 className="text-2xl font-bold text-white tracking-tight">MCQ Practice Room</h2>
-        <p className="text-xs text-slate-400">Configure your target practice session with instant explanations.</p>
+      {/* Header & Quick Action Shortcuts */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">MCQ Practice Room</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            Targeted drills with instant explanations and topic accuracy analysis.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={<Upload className="w-4 h-4 text-blue-500" />}
+            onClick={() => onNavigate('questions')}
+          >
+            Upload PDF
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-amber-500/40 text-amber-600 dark:text-amber-300 hover:bg-amber-500/10"
+            leftIcon={<Sparkles className="w-4 h-4 text-amber-500" />}
+            onClick={() => setIsAIModalOpen(true)}
+          >
+            Ask AI
+          </Button>
+        </div>
       </div>
 
-      <Card className="p-6 border-slate-800 space-y-6">
+      <Card className="p-6 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 shadow-xs space-y-6">
         {/* 1. Target Selector */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-            1. Select Target
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+            1. Select Target Exam
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {targets.map(target => (
@@ -147,26 +187,29 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
                 }}
                 className={`flex items-center gap-3 p-3.5 rounded-xl border text-left transition-all ${
                   selectedTargetId === target.id
-                    ? 'border-brand-500 bg-brand-500/10 text-white shadow-sm'
-                    : 'border-slate-800 bg-slate-900/60 text-slate-300 hover:border-slate-700'
+                    ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-950/30 text-slate-900 dark:text-white ring-1 ring-brand-500'
+                    : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-slate-300 text-slate-700 dark:text-slate-300'
                 }`}
               >
-                <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: target.color }} />
-                <div className="truncate">
-                  <p className="font-bold text-sm truncate">{target.name}</p>
-                  <p className="text-[11px] text-slate-400">{target.type}</p>
+                <div
+                  className="w-3 h-3 rounded-full shrink-0"
+                  style={{ backgroundColor: target.color || '#6366f1' }}
+                />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold truncate">{target.name}</p>
+                  <p className="text-[10px] text-slate-400">{target.type}</p>
                 </div>
               </button>
             ))}
           </div>
         </div>
 
-        {/* 2. Optional Subject & Topic */}
+        {/* 2. Subject & Topic Filter */}
         {subjects.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                Subject (Optional)
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                2. Subject (Optional)
               </label>
               <select
                 value={selectedSubjectId}
@@ -174,7 +217,7 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
                   setSelectedSubjectId(e.target.value);
                   setSelectedTopicId('');
                 }}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
               >
                 <option value="">All Subjects</option>
                 {subjects.map(s => (
@@ -183,78 +226,47 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
-                Topic (Optional)
-              </label>
-              <select
-                value={selectedTopicId}
-                onChange={e => setSelectedTopicId(e.target.value)}
-                disabled={!selectedSubjectId || topics.length === 0}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-50"
-              >
-                <option value="">All Topics</option>
-                {topics.map(t => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
-              </select>
-            </div>
+            {topics.length > 0 && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+                  Topic (Optional)
+                </label>
+                <select
+                  value={selectedTopicId}
+                  onChange={e => setSelectedTopicId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white"
+                >
+                  <option value="">All Topics</option>
+                  {topics.map(tp => (
+                    <option key={tp.id} value={tp.id}>{tp.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 3. Question Count & Filter Mode */}
-        <div className="pt-2">
-          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-            2. Number of Questions
+        {/* 3. Practice Mode Selection */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+            3. Practice Mode & Source
           </label>
-          <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
-            {[5, 10, 15, 25, 50, 60].map(count => (
-              <button
-                key={count}
-                type="button"
-                onClick={() => setQuestionCount(count)}
-                className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
-                  questionCount === count
-                    ? 'bg-brand-600 border-brand-500 text-white shadow-md shadow-brand-500/20'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
-                }`}
-              >
-                {count} Qs
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setQuestionCount(questions.length || 10)}
-              className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${
-                questionCount === questions.length
-                  ? 'bg-brand-600 border-brand-500 text-white'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
-              }`}
-            >
-              All ({questions.length})
-            </button>
-          </div>
-        </div>
-
-        {/* 4. Practice Mode Filters */}
-        <div className="pt-2">
-          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-            3. Practice Filter
-          </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {[
-              { id: 'all', label: 'All Questions' },
-              { id: 'wrong_only', label: 'Past Mistakes' },
-              { id: 'unseen', label: 'Unseen MCQs' },
+              { id: 'all', label: 'All Available' },
+              { id: 'weak_topics', label: 'Weak Topics' },
+              { id: 'old_questions', label: 'Old Questions Only' },
+              { id: 'ai_pattern', label: 'AI Past-Pattern' },
+              { id: 'wrong_only', label: 'Wrong Questions Only' },
             ].map(m => (
               <button
                 key={m.id}
                 type="button"
                 onClick={() => setMode(m.id as any)}
-                className={`py-2 rounded-xl text-xs font-semibold border transition-all ${
+                className={`py-2.5 px-3 rounded-xl border text-xs font-semibold transition-all text-center ${
                   mode === m.id
-                    ? 'bg-brand-600 border-brand-500 text-white'
-                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+                    ? 'border-brand-500 bg-brand-50 dark:bg-brand-950/30 text-brand-600 dark:text-brand-400 ring-1 ring-brand-500'
+                    : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
                 }`}
               >
                 {m.label}
@@ -263,24 +275,91 @@ export const Practice: React.FC<PracticeProps> = ({ onStartSession, initialTarge
           </div>
         </div>
 
-        {/* Summary Footer & Start Button */}
-        <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
-          <div className="text-xs text-slate-400">
-            Available in pool: <strong className="text-white">{questions.length} Questions</strong>
+        {/* 4. Question Count & Timer Configuration */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+              4. Question Count
+            </label>
+            <div className="flex gap-2">
+              {[5, 10, 15, 25, 50].map(cnt => (
+                <button
+                  key={cnt}
+                  type="button"
+                  onClick={() => setQuestionCount(cnt)}
+                  className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all ${
+                    questionCount === cnt
+                      ? 'border-brand-500 bg-brand-600 text-white shadow-xs'
+                      : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  {cnt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1.5">
+              Timed Practice
+            </label>
+            <div className="flex items-center gap-3 pt-1">
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isTimed}
+                  onChange={e => setIsTimed(e.target.checked)}
+                  className="rounded text-brand-600 focus:ring-brand-500"
+                />
+                <span>Enable Timer</span>
+              </label>
+
+              {isTimed && (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={timeMinutes}
+                    onChange={e => setTimeMinutes(Number(e.target.value))}
+                    className="w-16 px-2 py-1 text-xs text-center rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-bold"
+                  />
+                  <span className="text-xs text-slate-400">minutes</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Question Pool Status & Launch Button */}
+        <div className="pt-4 border-t border-slate-200 dark:border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {questions.length > 0 ? (
+              <span>✓ <strong>{questions.length}</strong> matching questions available in your bank</span>
+            ) : (
+              <span className="text-amber-500">⚠ No matching questions found for this selection</span>
+            )}
           </div>
 
           <Button
             variant="primary"
             size="lg"
             leftIcon={<Play className="w-4 h-4 fill-current" />}
-            onClick={handleStartPractice}
             disabled={questions.length === 0}
-            className="px-8 shadow-lg shadow-brand-500/20"
+            onClick={handleStartPractice}
+            className="w-full sm:w-auto px-8"
           >
-            Start Practice
+            Start Practice ({Math.min(questionCount, questions.length)} Qs)
           </Button>
         </div>
       </Card>
+
+      {/* AI Study Builder Modal */}
+      <AIStudyBuilderModal
+        isOpen={isAIModalOpen}
+        onClose={() => setIsAIModalOpen(false)}
+        initialTargetId={selectedTargetId}
+      />
     </div>
   );
 };
