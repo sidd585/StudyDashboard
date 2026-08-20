@@ -27,6 +27,16 @@ export const adminService = {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
 
+    // Get current user's profile to determine role
+    const { data: myProfile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const isMainAdmin = myProfile?.role === 'MAIN_ADMIN';
+    const isSubAdmin = myProfile?.role === 'SUB_ADMIN';
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -37,7 +47,7 @@ export const adminService = {
       return [];
     }
 
-    return (data || []).map(p => ({
+    const allProfiles = (data || []).map(p => ({
       id: p.id,
       email: p.email,
       displayName: p.display_name,
@@ -48,6 +58,64 @@ export const adminService = {
       dailyGoalMinutes: p.daily_goal_minutes || 120,
       createdAt: p.created_at,
     }));
+
+    // Sub-Admin restriction: Sub-Admins CANNOT look at Admin and Admin's Friend dashboards/users
+    if (isSubAdmin && !isMainAdmin) {
+      return allProfiles.filter(p => {
+        // Exclude Main Admin
+        if (p.role === 'MAIN_ADMIN') return false;
+        // Exclude Admin Friend
+        if (p.role === 'FRIEND') return false;
+        // Exclude users marked hidden from sub-admin
+        if (!p.visibleToSubAdmin) return false;
+        return true;
+      });
+    }
+
+    return allProfiles;
+  },
+
+  // Delete User and wipe their associated records (Admin only)
+  async deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, message: 'Authentication required.' };
+    if (user.id === userId) {
+      return { success: false, message: 'You cannot delete your own admin account.' };
+    }
+
+    try {
+      // 1. Wipe all study data and cascading child records
+      await this.resetUserData(userId, 'FULL_STUDY_DATA');
+
+      // 2. Remove any study relationships
+      await supabase
+        .from('study_relationships')
+        .delete()
+        .or(`owner_user_id.eq.${userId},friend_user_id.eq.${userId}`);
+
+      // 3. Delete profile from public.profiles
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId);
+
+      if (error) {
+        console.warn('Profile deletion error:', error.message);
+        // If hard delete restricted by auth FK, deactivate as clean fallback
+        await supabase
+          .from('profiles')
+          .update({ status: 'DEACTIVATED', updated_at: new Date().toISOString() })
+          .eq('id', userId);
+
+        return { success: true, message: 'User data wiped and account deactivated.' };
+      }
+
+      this.clearLocalTimerCaches(userId);
+      return { success: true, message: 'User and all associated data permanently deleted.' };
+    } catch (err: any) {
+      console.error('Failed to delete user:', err);
+      return { success: false, message: err?.message || 'Failed to delete user.' };
+    }
   },
 
   // Get Admin Overview Stats

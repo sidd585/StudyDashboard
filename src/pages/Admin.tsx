@@ -53,6 +53,11 @@ export const Admin: React.FC = () => {
   const [resetConfirmText, setResetConfirmText] = useState('');
   const [isResetting, setIsResetting] = useState(false);
 
+  // Delete User Modal State (Main Admin Only)
+  const [deleteModalUser, setDeleteModalUser] = useState<AdminUserListItem | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const loadData = async () => {
     setLoading(true);
     try {
@@ -174,6 +179,27 @@ export const Admin: React.FC = () => {
       }
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  // Execute User Delete (Admin Only)
+  const handleExecuteDelete = async () => {
+    if (!deleteModalUser || deleteConfirmText !== 'DELETE') return;
+    setIsDeleting(true);
+    try {
+      const success = await adminService.deleteUser(deleteModalUser.id);
+      if (success) {
+        alert(`User account ${deleteModalUser.displayName} (${deleteModalUser.email}) has been removed.`);
+        setDeleteModalUser(null);
+        setDeleteConfirmText('');
+        loadData();
+      } else {
+        alert('Failed to delete user.');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Error deleting user.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -513,10 +539,23 @@ export const Admin: React.FC = () => {
                                 setResetModalUser(u);
                                 setResetConfirmText('');
                               }}
-                              className="text-xs font-semibold text-rose-600 hover:underline p-1"
+                              className="text-xs font-semibold text-amber-600 hover:underline p-1"
                             >
                               Reset Data
                             </button>
+                            {isMainAdmin && (
+                              <button
+                                onClick={() => {
+                                  setDeleteModalUser(u);
+                                  setDeleteConfirmText('');
+                                }}
+                                className="text-xs font-semibold text-rose-600 hover:underline p-1 flex items-center gap-0.5"
+                                title="Permanently Delete User"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -684,6 +723,59 @@ export const Admin: React.FC = () => {
                 className="bg-rose-600 text-white font-bold"
               >
                 {isResetting ? 'Resetting...' : 'Confirm Reset'}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Delete User Modal (Main Admin Only) */}
+      {deleteModalUser && (
+        <Modal
+          isOpen={true}
+          onClose={() => setDeleteModalUser(null)}
+          title={`Permanently Delete User: ${deleteModalUser.displayName}`}
+          size="md"
+        >
+          <div className="space-y-4 text-xs">
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-400 rounded-xl space-y-1">
+              <p className="font-extrabold text-sm flex items-center gap-1.5">
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>Permanent Account Deletion</span>
+              </p>
+              <p>
+                Are you sure you want to permanently delete <strong>{deleteModalUser.displayName}</strong> ({deleteModalUser.email})?
+              </p>
+              <p className="text-[11px]">
+                This will delete the user's profile and all associated data from the platform. This action is irreversible.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label className="block font-bold text-[#334155] dark:text-[#cbd5e1]">
+                Type <span className="text-rose-600 font-extrabold">DELETE</span> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={e => setDeleteConfirmText(e.target.value)}
+                placeholder="DELETE"
+                className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-rose-600 outline-none font-extrabold tracking-wider"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setDeleteModalUser(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={deleteConfirmText !== 'DELETE' || isDeleting}
+                onClick={handleExecuteDelete}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete User Permanently'}
               </Button>
             </div>
           </div>

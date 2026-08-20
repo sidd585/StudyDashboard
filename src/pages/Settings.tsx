@@ -249,44 +249,77 @@ export const Settings: React.FC = () => {
           <div className="md:col-span-8 p-6 sm:p-8">
             {/* TAB 1: PROFILE */}
             {activeTab === 'profile' && (
-              <form onSubmit={handleSaveProfile} className="space-y-4">
-                <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Profile Settings</h3>
+              <form onSubmit={handleSaveProfile} className="space-y-5">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">Personal Account Profile</h3>
+                  <Badge variant="brand">{currentUser.role === 'MAIN_ADMIN' ? 'Super Admin' : currentUser.role === 'SUB_ADMIN' ? 'Sub-Admin' : currentUser.role === 'FRIEND' ? 'Admin Friend' : 'Student'}</Badge>
+                </div>
 
-                <div className="flex items-center gap-4 pb-2">
-                  <img
-                    src={currentUser.avatarUrl}
-                    alt={currentUser.name}
-                    className="w-14 h-14 rounded-full border-2 border-[#5b5bd6] object-cover shadow-xs"
-                  />
-                  <div>
-                    <h4 className="font-bold text-sm text-[#101828] dark:text-[#f8f9fc]">{currentUser.name}</h4>
-                    <p className="text-xs text-[#64748b] dark:text-[#9496a8]">{user?.email || currentUser.email}</p>
-                    <Badge variant="brand" className="mt-1">{currentUser.role}</Badge>
+                <div className="p-4 rounded-2xl bg-[#f8fafc] dark:bg-[#181d2f] border border-[#e2e8f0] dark:border-[#2b334d] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <img
+                      src={currentUser.avatarUrl}
+                      alt={displayName || currentUser.name}
+                      className="w-16 h-16 rounded-2xl border-2 border-[#5b5bd6] object-cover shadow-xs"
+                    />
+                    <div>
+                      <h4 className="font-extrabold text-base text-[#101828] dark:text-[#f8f9fc]">{displayName || currentUser.name}</h4>
+                      <p className="text-xs text-[#64748b] dark:text-[#9496a8] font-medium">{user?.email || currentUser.email}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                          ✓ Verified Account
+                        </span>
+                        <span className="text-[11px] text-[#64748b] dark:text-[#9496a8]">
+                          Role: <strong>{currentUser.role}</strong>
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                    Display Name
+                    Full / Display Name *
                   </label>
                   <input
                     type="text"
                     value={displayName}
                     onChange={e => setDisplayName(e.target.value)}
+                    placeholder="Enter your full name"
                     required
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6] font-semibold"
                   />
+                  <p className="text-[11px] text-[#64748b] dark:text-[#9496a8]">
+                    This name is displayed on your dashboard, greeting banner, and study reports.
+                  </p>
                 </div>
 
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
-                    Authenticated Email
+                    Account Email Address
                   </label>
                   <input
                     type="email"
                     value={user?.email || currentUser.email}
                     disabled
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#94a3b8] cursor-not-allowed"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#64748b] dark:text-[#9496a8] cursor-not-allowed font-medium"
+                  />
+                  <p className="text-[11px] text-[#64748b] dark:text-[#9496a8]">
+                    Email address associated with your login credentials.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+                    Default Daily Focus Target (Minutes)
+                  </label>
+                  <input
+                    type="number"
+                    min={15}
+                    max={720}
+                    value={dailyGoalMinutes}
+                    onChange={e => setDailyGoalMinutes(parseInt(e.target.value) || 120)}
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6] font-semibold"
                   />
                 </div>
 
@@ -298,13 +331,13 @@ export const Settings: React.FC = () => {
                     type="text"
                     value="Asia/Kathmandu (UTC +05:45)"
                     disabled
-                    className="w-full px-3.5 py-2 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#94a3b8] cursor-not-allowed"
+                    className="w-full px-3.5 py-2.5 rounded-xl text-xs bg-[#f8fafc] dark:bg-[#141824] border border-[#e2e8f0] dark:border-[#23293d] text-[#94a3b8] cursor-not-allowed font-medium"
                   />
                 </div>
 
                 <div className="pt-2">
-                  <Button type="submit" variant="primary" size="sm" className="bg-[#5b5bd6] text-white font-bold">
-                    Save Profile
+                  <Button type="submit" variant="primary" size="md" className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold shadow-xs">
+                    Save Profile Changes
                   </Button>
                 </div>
               </form>

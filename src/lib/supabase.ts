@@ -64,6 +64,7 @@ export interface CloudCourse {
   name: string;
   description?: string;
   year?: number;
+  exam_date?: string | null;
   daily_goal_minutes: number;
   color: string;
   is_sample: boolean;

@@ -130,3 +130,34 @@ describe('dateUtils - Asia/Kathmandu & Streak Logic', () => {
     expect(monthly[0].activeDaysCount).toBe(1);
   });
 });
+
+import { getExamCountdown, getFormattedDateAndDay } from '../src/utils/dateCountdownUtils';
+
+describe('dateCountdownUtils - Exam Countdown & Date/Day Formatting', () => {
+  it('should format Date and Day clearly without email', () => {
+    const d = new Date('2026-08-20T08:00:00Z');
+    const info = getFormattedDateAndDay(d);
+    expect(info.dayName).toBeDefined();
+    expect(typeof info.fullDateString).toBe('string');
+    expect(info.fullDateString.length).toBeGreaterThan(5);
+    expect(info.formattedDate).toContain('2026');
+  });
+
+  it('should calculate exam countdowns for future dates', () => {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + 15);
+    const dateStr = futureDate.toISOString().split('T')[0];
+
+    const countdown = getExamCountdown(dateStr);
+    expect(countdown.hasExamDate).toBe(true);
+    expect(countdown.isPast).toBe(false);
+    expect(countdown.daysRemaining).toBeGreaterThanOrEqual(14);
+    expect(countdown.formattedCountdown).toContain('days left');
+  });
+
+  it('should handle null/empty exam date gracefully', () => {
+    const countdown = getExamCountdown(null);
+    expect(countdown.hasExamDate).toBe(false);
+    expect(countdown.formattedCountdown).toBe('No Exam Date');
+  });
+});

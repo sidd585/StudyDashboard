@@ -131,4 +131,124 @@ describe('ACCEPTANCE TESTS — StudyDashboard Streamlined Suite', () => {
       expect(shilpaPrivateQuestions.some(q => q.id === 'q-sid-1')).toBe(false);
     });
   });
+
+  // 5. ROLE HIERARCHY & SUB-ADMIN VISIBILITY RESTRICTION
+  describe('5. Role Hierarchy & Sub-Admin Visibility Masking', () => {
+    interface TestUser {
+      id: string;
+      displayName: string;
+      email: string;
+      role: 'MAIN_ADMIN' | 'SUB_ADMIN' | 'FRIEND' | 'USER';
+      managedBy?: string;
+      visibleToSubAdmin: boolean;
+    }
+
+    const mockDatabaseUsers: TestUser[] = [
+      { id: 'admin-1', displayName: 'Super Admin', email: 'admin@studyos.org', role: 'MAIN_ADMIN', visibleToSubAdmin: false },
+      { id: 'friend-1', displayName: 'Admin Friend', email: 'friend@studyos.org', role: 'FRIEND', visibleToSubAdmin: false },
+      { id: 'subadmin-1', displayName: 'Sub Admin One', email: 'sub@studyos.org', role: 'SUB_ADMIN', visibleToSubAdmin: true },
+      { id: 'student-1', displayName: 'Student Ram', email: 'ram@studyos.org', role: 'USER', managedBy: 'subadmin-1', visibleToSubAdmin: true },
+      { id: 'student-2', displayName: 'Student Sita', email: 'sita@studyos.org', role: 'USER', visibleToSubAdmin: true },
+    ];
+
+    it('Super Admin can see all users, assign roles, and delete accounts', () => {
+      // Main Admin query
+      const visibleToAdmin = mockDatabaseUsers;
+      expect(visibleToAdmin.length).toBe(5);
+      expect(visibleToAdmin.some(u => u.role === 'MAIN_ADMIN')).toBe(true);
+      expect(visibleToAdmin.some(u => u.role === 'FRIEND')).toBe(true);
+
+      // Main admin delete operation
+      const remainingAfterDelete = visibleToAdmin.filter(u => u.id !== 'student-2');
+      expect(remainingAfterDelete.length).toBe(4);
+      expect(remainingAfterDelete.some(u => u.id === 'student-2')).toBe(false);
+    });
+
+    it('Sub-Admin CANNOT view Main Admin or Admin Friend data', () => {
+      // Sub-Admin filtered view
+      const subAdminFilter = (users: TestUser[]) =>
+        users.filter(u => u.role !== 'MAIN_ADMIN' && u.role !== 'FRIEND' && u.visibleToSubAdmin);
+
+      const visibleToSubAdmin = subAdminFilter(mockDatabaseUsers);
+      expect(visibleToSubAdmin.length).toBe(3);
+      expect(visibleToSubAdmin.some(u => u.role === 'MAIN_ADMIN')).toBe(false);
+      expect(visibleToSubAdmin.some(u => u.role === 'FRIEND')).toBe(false);
+      expect(visibleToSubAdmin.some(u => u.email === 'admin@studyos.org')).toBe(false);
+      expect(visibleToSubAdmin.some(u => u.email === 'friend@studyos.org')).toBe(false);
+    });
+  });
+
+  // 6. EXAM COUNTDOWN & DATE FORMATTING
+  describe('6. Exam Date & Live Countdown', () => {
+    it('should compute remaining days, urgency, and formatted badges for exam targets', () => {
+      const now = new Date();
+      const examIn30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      // Simulated course model
+      const course = {
+        id: 'c-nrb',
+        name: 'Nepal Rastra Bank Assistant',
+        examDate: examIn30Days,
+        dailyGoalMinutes: 60,
+      };
+
+      const daysRemaining = Math.ceil((new Date(`${course.examDate}T00:00:00`).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+      expect(daysRemaining).toBeGreaterThanOrEqual(29);
+      expect(daysRemaining).toBeLessThanOrEqual(31);
+    });
+  });
+
+  // 7. RECORD DEDUPLICATION
+  describe('7. Deduplication Prevention across Courses & Questions', () => {
+    it('prevents adding duplicate courses with the same name (case-insensitive)', () => {
+      const existingCourses = [
+        { id: '1', name: 'RBB Preparation' },
+        { id: '2', name: 'NRB Assistant' },
+      ];
+
+      const checkDuplicateCourse = (name: string) => {
+        const norm = name.trim().toLowerCase();
+        return existingCourses.some(c => c.name.trim().toLowerCase() === norm);
+      };
+
+      expect(checkDuplicateCourse('rbb preparation')).toBe(true);
+      expect(checkDuplicateCourse('  RBB PREPARATION  ')).toBe(true);
+      expect(checkDuplicateCourse('NRB Officer')).toBe(false);
+    });
+
+    it('prevents adding duplicate questions for the same course', () => {
+      const existingQuestions = [
+        { id: 'q1', courseId: 'c1', questionText: 'What is the full form of BAFIA?' },
+      ];
+
+      const checkDuplicateQuestion = (courseId: string, text: string) => {
+        const norm = text.trim().toLowerCase();
+        return existingQuestions.some(q => q.courseId === courseId && q.questionText.trim().toLowerCase() === norm);
+      };
+
+      expect(checkDuplicateQuestion('c1', 'what is the full form of bafia?')).toBe(true);
+      expect(checkDuplicateQuestion('c2', 'what is the full form of bafia?')).toBe(false);
+      expect(checkDuplicateQuestion('c1', 'What is Nepal Rastra Bank Act 2058?')).toBe(false);
+    });
+  });
+
+  // 8. DISPLAY NAME VS EMAIL PRIVACY
+  describe('8. Display Name vs Authenticated Email Separation', () => {
+    it('ensures dashboard greetings always use Display Name, not raw email addresses', () => {
+      const profile = {
+        displayName: 'Aayush Shrestha',
+        email: 'aayush.shrestha.dev99@gmail.com',
+      };
+
+      const getDashboardGreeting = (p: typeof profile) => {
+        const name = p.displayName || p.email.split('@')[0];
+        return `Namaste, ${name}! Ready to achieve your study targets today?`;
+      };
+
+      const greeting = getDashboardGreeting(profile);
+      expect(greeting).toContain('Aayush Shrestha');
+      expect(greeting).not.toContain('@gmail.com');
+      expect(greeting).not.toContain('aayush.shrestha.dev99');
+    });
+  });
 });

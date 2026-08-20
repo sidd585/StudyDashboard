@@ -82,17 +82,33 @@ export const questionService = {
     return counts;
   },
 
-  // Insert a single question
+  // Insert a single question with deduplication check
   async createQuestion(input: QuestionInsertInput): Promise<CloudQuestion | null> {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
+
+    const trimmedText = input.questionText.trim();
+    if (!trimmedText) return null;
+
+    // Check if question already exists in this course
+    const { data: existing } = await supabase
+      .from('questions')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('course_id', input.courseId)
+      .eq('question_text', trimmedText)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      throw new Error('This question already exists in this course. Duplicate questions are not allowed.');
+    }
 
     const payload: any = {
       user_id: user.id,
       course_id: input.courseId,
       subject_id: input.subjectId || null,
       topic_id: input.topicId || null,
-      question_text: input.questionText.trim(),
+      question_text: trimmedText,
       option_a: input.optionA.trim(),
       option_b: input.optionB.trim(),
       option_c: input.optionC.trim(),
@@ -118,11 +134,46 @@ export const questionService = {
   // Batch insert with duplicate safety and automatic fallback
   async createQuestionsBatch(
     inputs: QuestionInsertInput[]
-  ): Promise<{ inserted: number; errors: number; lastError: string | null }> {
+  ): Promise<{ inserted: number; errors: number; duplicatesSkipped: number; lastError: string | null }> {
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user || inputs.length === 0) return { inserted: 0, errors: 0, lastError: 'No authenticated user found' };
+    if (!user || inputs.length === 0) return { inserted: 0, errors: 0, duplicatesSkipped: 0, lastError: 'No authenticated user found' };
 
-    const rows = inputs.map(input => ({
+    // Deduplicate within input batch
+    const uniqueInputs: QuestionInsertInput[] = [];
+    const seenTexts = new Set<string>();
+
+    let duplicatesSkipped = 0;
+    for (const item of inputs) {
+      const key = `${item.courseId}_${item.questionText.trim().toLowerCase()}`;
+      if (seenTexts.has(key)) {
+        duplicatesSkipped++;
+      } else {
+        seenTexts.add(key);
+        uniqueInputs.push(item);
+      }
+    }
+
+    // Check existing questions in database for these course IDs
+    const courseIds = Array.from(new Set(uniqueInputs.map(u => u.courseId)));
+    const { data: existingDbQuestions } = await supabase
+      .from('questions')
+      .select('course_id, question_text')
+      .eq('user_id', user.id)
+      .in('course_id', courseIds);
+
+    const existingDbSet = new Set<string>();
+    (existingDbQuestions || []).forEach(q => {
+      existingDbSet.add(`${q.course_id}_${q.question_text.trim().toLowerCase()}`);
+    });
+
+    const rowsToInsert = uniqueInputs.filter(item => {
+      const key = `${item.courseId}_${item.questionText.trim().toLowerCase()}`;
+      if (existingDbSet.has(key)) {
+        duplicatesSkipped++;
+        return false;
+      }
+      return true;
+    }).map(input => ({
       user_id: user.id,
       course_id: input.courseId,
       subject_id: input.subjectId || null,
@@ -137,13 +188,17 @@ export const questionService = {
       year: input.year || 2027,
     }));
 
+    if (rowsToInsert.length === 0) {
+      return { inserted: 0, errors: 0, duplicatesSkipped, lastError: null };
+    }
+
     let totalInserted = 0;
     let totalErrors = 0;
     let lastError: string | null = null;
     const chunkSize = 25;
 
-    for (let i = 0; i < rows.length; i += chunkSize) {
-      const chunk = rows.slice(i, i + chunkSize);
+    for (let i = 0; i < rowsToInsert.length; i += chunkSize) {
+      const chunk = rowsToInsert.slice(i, i + chunkSize);
       const { data, error } = await supabase
         .from('questions')
         .insert(chunk)
@@ -193,11 +248,11 @@ export const questionService = {
           }
         }
       } else {
-        totalInserted += (data?.length || 0);
+        totalInserted += (data?.length || chunk.length);
       }
     }
 
-    return { inserted: totalInserted, errors: totalErrors, lastError };
+    return { inserted: totalInserted, errors: totalErrors, duplicatesSkipped, lastError };
   },
 
   // Delete a question

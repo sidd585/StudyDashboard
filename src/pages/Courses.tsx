@@ -3,6 +3,7 @@ import { useUser } from '../context/UserContext';
 import { courseService } from '../services/courseService';
 import { extractSyllabusFromFile } from '../services/syllabusExtractor';
 import { type CloudCourse, type CloudSubject, type CloudTopic } from '../lib/supabase';
+import { getExamCountdown } from '../utils/dateCountdownUtils';
 import type { ExtractedTopicSection } from '../types';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -22,6 +23,9 @@ import {
   Clock,
   Sparkles,
   AlertCircle,
+  Hourglass,
+  Calendar,
+  Settings2,
 } from 'lucide-react';
 
 export const Courses: React.FC = () => {
@@ -36,6 +40,7 @@ export const Courses: React.FC = () => {
 
   // Modal States
   const [isCourseModalOpen, setIsCourseModalOpen] = useState(false);
+  const [isEditCourseModalOpen, setIsEditCourseModalOpen] = useState(false);
   const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
   const [isEditSubjectModalOpen, setIsEditSubjectModalOpen] = useState(false);
@@ -43,20 +48,31 @@ export const Courses: React.FC = () => {
   const [isSyllabusUploadModalOpen, setIsSyllabusUploadModalOpen] = useState(false);
   const [isConfirmationModalOpen, setIsConfirmationModalOpen] = useState(false);
 
-  // Course Form State (Only Course Name & Daily Goal)
+  // Create Course Form State
   const [courseName, setCourseName] = useState('');
   const [dailyGoalMinutes, setDailyGoalMinutes] = useState<number>(60);
+  const [examDate, setExamDate] = useState<string>('');
   const [isSubmittingCourse, setIsSubmittingCourse] = useState(false);
   const [courseError, setCourseError] = useState<string | null>(null);
+
+  // Edit Course Form State
+  const [editingCourse, setEditingCourse] = useState<CloudCourse | null>(null);
+  const [editCourseName, setEditCourseName] = useState('');
+  const [editDailyGoalMinutes, setEditDailyGoalMinutes] = useState<number>(60);
+  const [editExamDate, setEditExamDate] = useState<string>('');
+  const [editCourseError, setEditCourseError] = useState<string | null>(null);
+  const [isUpdatingCourse, setIsUpdatingCourse] = useState(false);
 
   // Subject Form State
   const [subjectName, setSubjectName] = useState('');
   const [subjectCode, setSubjectCode] = useState('');
+  const [subjectError, setSubjectError] = useState<string | null>(null);
   const [editingSubject, setEditingSubject] = useState<CloudSubject | null>(null);
 
   // Topic Form State
   const [topicName, setTopicName] = useState('');
   const [topicCode, setTopicCode] = useState('');
+  const [topicError, setTopicError] = useState<string | null>(null);
   const [editingTopic, setEditingTopic] = useState<CloudTopic | null>(null);
 
   // Syllabus Extractor Upload & Confirmation State
@@ -137,7 +153,7 @@ export const Courses: React.FC = () => {
   const activeCourse = courses.find(c => c.id === selectedCourseId);
   const activeSubject = subjects.find(s => s.id === selectedSubjectId);
 
-  // Handle Save Course (Only Course Name & Minimum Daily Study Time)
+  // Handle Save Course (Name, Daily Goal, Exam Date with Deduplication)
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseName.trim()) return;
@@ -149,6 +165,7 @@ export const Courses: React.FC = () => {
       const newCourse = await courseService.createCourse({
         name: courseName.trim(),
         dailyGoalMinutes: dailyGoalMinutes || 60,
+        examDate: examDate || null,
       });
 
       if (newCourse) {
@@ -156,6 +173,7 @@ export const Courses: React.FC = () => {
         setSelectedCourseId(newCourse.id);
         setIsCourseModalOpen(false);
         setCourseName('');
+        setExamDate('');
         setDailyGoalMinutes(60);
       } else {
         setCourseError('Could not save course. Please check your connection and try again.');
@@ -168,10 +186,55 @@ export const Courses: React.FC = () => {
     }
   };
 
-  // Handle Save Subject
+  // Open Edit Course Modal
+  const handleOpenEditCourse = (course: CloudCourse) => {
+    setEditingCourse(course);
+    setEditCourseName(course.name);
+    setEditDailyGoalMinutes(course.daily_goal_minutes || 60);
+    setEditExamDate(course.exam_date ? course.exam_date.split('T')[0] : '');
+    setEditCourseError(null);
+    setIsEditCourseModalOpen(true);
+  };
+
+  // Handle Update Course
+  const handleUpdateCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCourse || !editCourseName.trim()) return;
+
+    setIsUpdatingCourse(true);
+    setEditCourseError(null);
+
+    try {
+      const success = await courseService.updateCourse(editingCourse.id, {
+        name: editCourseName.trim(),
+        dailyGoalMinutes: editDailyGoalMinutes || 60,
+        examDate: editExamDate || null,
+      });
+
+      if (success) {
+        setCourses(prev => prev.map(c => c.id === editingCourse.id ? {
+          ...c,
+          name: editCourseName.trim(),
+          daily_goal_minutes: editDailyGoalMinutes || 60,
+          exam_date: editExamDate || null,
+        } : c));
+        setIsEditCourseModalOpen(false);
+        setEditingCourse(null);
+      } else {
+        setEditCourseError('Failed to update course.');
+      }
+    } catch (err: any) {
+      setEditCourseError(err?.message || 'Failed to update course.');
+    } finally {
+      setIsUpdatingCourse(false);
+    }
+  };
+
+  // Handle Save Subject with Deduplication
   const handleSaveSubject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourseId || !subjectName.trim()) return;
+    setSubjectError(null);
 
     try {
       const newSub = await courseService.createSubject({
@@ -188,8 +251,9 @@ export const Courses: React.FC = () => {
         setSubjectName('');
         setSubjectCode('');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving subject:', err);
+      setSubjectError(err?.message || 'Failed to save subject.');
     }
   };
 
@@ -197,25 +261,32 @@ export const Courses: React.FC = () => {
   const handleUpdateSubject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingSubject || !subjectName.trim()) return;
+    setSubjectError(null);
 
-    const success = await courseService.updateSubject(editingSubject.id, {
-      name: subjectName.trim(),
-      code: subjectCode.trim() || undefined,
-    });
+    try {
+      const success = await courseService.updateSubject(editingSubject.id, {
+        courseId: selectedCourseId || undefined,
+        name: subjectName.trim(),
+        code: subjectCode.trim() || undefined,
+      });
 
-    if (success) {
-      setSubjects(prev => prev.map(s => s.id === editingSubject.id ? { ...s, name: subjectName.trim(), code: subjectCode.trim() || undefined } : s));
-      setIsEditSubjectModalOpen(false);
-      setEditingSubject(null);
-      setSubjectName('');
-      setSubjectCode('');
+      if (success) {
+        setSubjects(prev => prev.map(s => s.id === editingSubject.id ? { ...s, name: subjectName.trim(), code: subjectCode.trim() || undefined } : s));
+        setIsEditSubjectModalOpen(false);
+        setEditingSubject(null);
+        setSubjectName('');
+        setSubjectCode('');
+      }
+    } catch (err: any) {
+      setSubjectError(err?.message || 'Failed to update subject.');
     }
   };
 
-  // Handle Save Topic
+  // Handle Save Topic with Deduplication
   const handleSaveTopic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedCourseId || !topicName.trim()) return;
+    setTopicError(null);
 
     try {
       const newTopic = await courseService.createTopic(
@@ -233,8 +304,9 @@ export const Courses: React.FC = () => {
         setTopicName('');
         setTopicCode('');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating topic:', err);
+      setTopicError(err?.message || 'Failed to create topic.');
     }
   };
 
@@ -242,18 +314,23 @@ export const Courses: React.FC = () => {
   const handleUpdateTopic = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingTopic || !topicName.trim()) return;
+    setTopicError(null);
 
-    const success = await courseService.updateTopic(editingTopic.id, {
-      name: topicName.trim(),
-      code: topicCode.trim() || undefined,
-    });
+    try {
+      const success = await courseService.updateTopic(editingTopic.id, {
+        name: topicName.trim(),
+        code: topicCode.trim() || undefined,
+      });
 
-    if (success) {
-      setTopics(prev => prev.map(t => t.id === editingTopic.id ? { ...t, name: topicName.trim(), code: topicCode.trim() || undefined } : t));
-      setIsEditTopicModalOpen(false);
-      setEditingTopic(null);
-      setTopicName('');
-      setTopicCode('');
+      if (success) {
+        setTopics(prev => prev.map(t => t.id === editingTopic.id ? { ...t, name: topicName.trim(), code: topicCode.trim() || undefined } : t));
+        setIsEditTopicModalOpen(false);
+        setEditingTopic(null);
+        setTopicName('');
+        setTopicCode('');
+      }
+    } catch (err: any) {
+      setTopicError(err?.message || 'Failed to update topic.');
     }
   };
 
@@ -379,33 +456,53 @@ export const Courses: React.FC = () => {
             {courses.length > 0 ? (
               courses.map(course => {
                 const isSelected = course.id === selectedCourseId;
+                const countdown = getExamCountdown(course.exam_date);
+
                 return (
                   <div
                     key={course.id}
                     onClick={() => setSelectedCourseId(course.id)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${
+                    className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                       isSelected
                         ? 'bg-white dark:bg-[#181d2f] border-[#5b5bd6] shadow-sm'
                         : 'bg-white/80 dark:bg-[#141824] border-[#e2e8f0] dark:border-[#23293d] hover:border-[#94a3b8] dark:hover:border-[#334155]'
                     }`}
                   >
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
                         className="w-3.5 h-3.5 rounded-full flex-shrink-0"
                         style={{ backgroundColor: course.color || '#5b5bd6' }}
                       />
-                      <div>
-                        <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc]">
+                      <div className="min-w-0">
+                        <h3 className="text-sm font-bold text-[#101828] dark:text-[#f8f9fc] truncate">
                           {course.name}
                         </h3>
-                        <p className="text-xs text-[#64748b] dark:text-[#9496a8] flex items-center gap-1.5 mt-0.5">
-                          <Clock className="w-3 h-3 text-[#5b5bd6]" />
-                          <span>Target: {course.daily_goal_minutes || 60}m / day</span>
-                        </p>
+                        <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                          <p className="text-[11px] text-[#64748b] dark:text-[#9496a8] flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-[#5b5bd6]" />
+                            <span>{course.daily_goal_minutes || 60}m/d</span>
+                          </p>
+
+                          {countdown.hasExamDate && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md border font-bold ${countdown.badgeColorClass}`}>
+                              {countdown.formattedCountdown}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEditCourse(course);
+                        }}
+                        className="p-1.5 text-[#94a3b8] hover:text-[#5b5bd6] rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                        title="Edit Course & Exam Date"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -433,7 +530,13 @@ export const Courses: React.FC = () => {
                   size="sm"
                   className="bg-white dark:bg-[#181d2f] text-[#5b5bd6] border-[#e2e8f0] dark:border-[#2b334d] font-bold"
                   leftIcon={<Plus className="w-3.5 h-3.5" />}
-                  onClick={() => setIsCourseModalOpen(true)}
+                  onClick={() => {
+                    setCourseName('');
+                    setDailyGoalMinutes(60);
+                    setExamDate('');
+                    setCourseError(null);
+                    setIsCourseModalOpen(true);
+                  }}
                 >
                   Create First Course
                 </Button>
@@ -448,15 +551,39 @@ export const Courses: React.FC = () => {
             <div className="space-y-6">
               {/* Course Detail Card Header */}
               <Card className="p-6 border-[#e2e8f0] dark:border-[#23293d] bg-white dark:bg-[#141824] shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: activeCourse.color || '#5b5bd6' }} />
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: activeCourse.color || '#5b5bd6' }} />
                     <h2 className="text-lg font-bold text-[#101828] dark:text-[#f8f9fc]">
                       {activeCourse.name}
                     </h2>
+
+                    {/* Active Course Exam Countdown Badge */}
+                    {(() => {
+                      const countdown = getExamCountdown(activeCourse.exam_date);
+                      if (countdown.hasExamDate) {
+                        return (
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs border font-bold ${countdown.badgeColorClass}`}>
+                            <Hourglass className="w-3.5 h-3.5" />
+                            <span>{countdown.formattedCountdown}</span>
+                            <span className="opacity-70 font-normal">({countdown.formattedExamDate})</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <button
+                          onClick={() => handleOpenEditCourse(activeCourse)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-[#5b5bd6] border border-slate-200 dark:border-slate-700 transition-colors"
+                        >
+                          <Calendar className="w-3.5 h-3.5" />
+                          <span>+ Set Exam Date</span>
+                        </button>
+                      );
+                    })()}
                   </div>
-                  <p className="text-xs text-[#64748b] dark:text-[#9496a8] mt-1 flex items-center gap-2">
-                    <span>Minimum Daily Goal: <strong className="text-[#5b5bd6] dark:text-[#8282ea]">{activeCourse.daily_goal_minutes || 60} mins</strong></span>
+
+                  <p className="text-xs text-[#64748b] dark:text-[#9496a8] flex items-center gap-2 flex-wrap">
+                    <span>Daily Goal: <strong className="text-[#5b5bd6] dark:text-[#8282ea]">{activeCourse.daily_goal_minutes || 60} mins</strong></span>
                     <span>•</span>
                     <span>{subjects.length} {subjects.length === 1 ? 'Subject' : 'Subjects'}</span>
                     <span>•</span>
@@ -464,7 +591,16 @@ export const Courses: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs font-bold bg-white dark:bg-[#181d2f] text-slate-700 dark:text-slate-300 border-[#e2e8f0] dark:border-[#2b334d]"
+                    leftIcon={<Settings2 className="w-3.5 h-3.5" />}
+                    onClick={() => handleOpenEditCourse(activeCourse)}
+                  >
+                    Edit Course
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -473,6 +609,7 @@ export const Courses: React.FC = () => {
                     onClick={() => {
                       setSubjectName('');
                       setSubjectCode('');
+                      setSubjectError(null);
                       setIsSubjectModalOpen(true);
                     }}
                   >
@@ -522,6 +659,7 @@ export const Courses: React.FC = () => {
                                 setEditingSubject(s);
                                 setSubjectName(s.name);
                                 setSubjectCode(s.code || '');
+                                setSubjectError(null);
                                 setIsEditSubjectModalOpen(true);
                               }}
                               className="p-0.5 hover:text-white"
@@ -551,6 +689,7 @@ export const Courses: React.FC = () => {
                       onClick={() => {
                         setSubjectName('');
                         setSubjectCode('');
+                        setSubjectError(null);
                         setIsSubjectModalOpen(true);
                       }}
                       className="mt-1 font-bold text-[#5b5bd6] dark:text-[#8282ea] hover:underline"
@@ -584,6 +723,7 @@ export const Courses: React.FC = () => {
                     onClick={() => {
                       setTopicName('');
                       setTopicCode('');
+                      setTopicError(null);
                       setIsTopicModalOpen(true);
                     }}
                   >
@@ -615,6 +755,7 @@ export const Courses: React.FC = () => {
                               setEditingTopic(t);
                               setTopicName(t.name);
                               setTopicCode(t.code || '');
+                              setTopicError(null);
                               setIsEditTopicModalOpen(true);
                             }}
                             className="p-1 text-[#94a3b8] hover:text-[#5b5bd6] transition-colors"
@@ -648,6 +789,7 @@ export const Courses: React.FC = () => {
                         onClick={() => {
                           setTopicName('');
                           setTopicCode('');
+                          setTopicError(null);
                           setIsTopicModalOpen(true);
                         }}
                       >
@@ -668,7 +810,7 @@ export const Courses: React.FC = () => {
         </div>
       </div>
 
-      {/* ================= MODAL 1: ADD COURSE (SIMPLIFIED) ================= */}
+      {/* ================= MODAL 1: ADD COURSE WITH EXAM DATE & COUNTDOWN ================= */}
       <Modal
         isOpen={isCourseModalOpen}
         onClose={() => setIsCourseModalOpen(false)}
@@ -691,11 +833,29 @@ export const Courses: React.FC = () => {
               type="text"
               value={courseName}
               onChange={e => setCourseName(e.target.value)}
-              placeholder="e.g. RBB Preparation, NRB Assistant, AI Course"
+              placeholder="e.g. RBB Preparation, NRB Assistant, Banking Exam"
               required
               autoFocus
               className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
             />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Target Exam Date (Optional)
+            </label>
+            <input
+              type="date"
+              value={examDate}
+              onChange={e => setExamDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+            {examDate && (
+              <div className="mt-1.5 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/40 text-xs flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+                <Hourglass className="w-3.5 h-3.5 shrink-0" />
+                <span>Countdown preview: <strong>{getExamCountdown(examDate).formattedCountdown}</strong></span>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -738,6 +898,89 @@ export const Courses: React.FC = () => {
         </form>
       </Modal>
 
+      {/* ================= MODAL: EDIT COURSE ================= */}
+      <Modal
+        isOpen={isEditCourseModalOpen}
+        onClose={() => setIsEditCourseModalOpen(false)}
+        title="Edit Course & Exam Date"
+        size="sm"
+      >
+        <form onSubmit={handleUpdateCourse} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {editCourseError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{editCourseError}</span>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Course Name *
+            </label>
+            <input
+              type="text"
+              value={editCourseName}
+              onChange={e => setEditCourseName(e.target.value)}
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Target Exam Date (Optional)
+            </label>
+            <input
+              type="date"
+              value={editExamDate}
+              onChange={e => setEditExamDate(e.target.value)}
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+            {editExamDate && (
+              <div className="mt-1.5 p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/40 text-xs flex items-center gap-2 text-indigo-700 dark:text-indigo-300">
+                <Hourglass className="w-3.5 h-3.5 shrink-0" />
+                <span>Countdown preview: <strong>{getExamCountdown(editExamDate).formattedCountdown}</strong></span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
+              Minimum Daily Study Time (Minutes) *
+            </label>
+            <input
+              type="number"
+              min={10}
+              max={720}
+              value={editDailyGoalMinutes}
+              onChange={e => setEditDailyGoalMinutes(parseInt(e.target.value) || 60)}
+              required
+              className="w-full px-3.5 py-2.5 rounded-xl text-xs sm:text-sm bg-white dark:bg-[#181d2f] border border-[#d0d5dd] dark:border-[#2b334d] text-[#101828] dark:text-[#f8f9fc] outline-none focus:border-[#5b5bd6]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setIsEditCourseModalOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={isUpdatingCourse || !editCourseName.trim()}
+              className="bg-[#5b5bd6] hover:bg-[#4a4ac9] text-white font-bold"
+            >
+              {isUpdatingCourse ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
       {/* ================= MODAL 2: ADD SUBJECT ================= */}
       <Modal
         isOpen={isSubjectModalOpen}
@@ -746,6 +989,13 @@ export const Courses: React.FC = () => {
         size="sm"
       >
         <form onSubmit={handleSaveSubject} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {subjectError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{subjectError}</span>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
               Subject Name *
@@ -804,6 +1054,13 @@ export const Courses: React.FC = () => {
         size="sm"
       >
         <form onSubmit={handleUpdateSubject} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {subjectError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{subjectError}</span>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
               Subject Name *
@@ -858,6 +1115,13 @@ export const Courses: React.FC = () => {
         size="sm"
       >
         <form onSubmit={handleSaveTopic} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {topicError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{topicError}</span>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
               Topic Name *
@@ -916,6 +1180,13 @@ export const Courses: React.FC = () => {
         size="sm"
       >
         <form onSubmit={handleUpdateTopic} className="space-y-4 text-[#101828] dark:text-[#f8f9fc]">
+          {topicError && (
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{topicError}</span>
+            </div>
+          )}
+
           <div className="space-y-1">
             <label className="block text-xs font-bold text-[#334155] dark:text-[#cbd5e1]">
               Topic Name *
